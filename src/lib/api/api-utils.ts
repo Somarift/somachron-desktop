@@ -1,16 +1,14 @@
 import type { ApiEmpty, IpcResult } from "$lib/models/api";
 
-export async function mapIpcResult<T>(invoke: Promise<T>): Promise<IpcResult<T>> {
-    return invoke.then((d) => {
+export async function mapIpcResult<T>(invoke: Promise<ArrayBuffer>): Promise<IpcResult<T>> {
+    return mapIpc(invoke, (d) => {
         let decoder = new TextDecoder();
-        let data = decoder.decode(d as ArrayBuffer);
-        return { type: "success", data: JSON.parse(data) } satisfies IpcResult<T>;
-    }).catch((err) => {
-        return { type: "error", error: err as ApiEmpty } satisfies IpcResult<T>;
+        let data = decoder.decode(d);
+        return JSON.parse(data);
     });
 }
 
-export async function mapIpcVoid(invoke: Promise<any>): Promise<IpcResult<any>> {
-    return invoke.then((_) => ({ type: "success", data: {} } satisfies IpcResult<any>))
-        .catch((err) => ({ type: "error", error: err as ApiEmpty } satisfies IpcResult<any>));
+export async function mapIpc<T>(invoke: Promise<ArrayBuffer>, transform: (arr: ArrayBuffer) => T): Promise<IpcResult<T>> {
+    return invoke.then((buf) => ({ type: "success", data: transform(buf) } satisfies IpcResult<T>))
+        .catch((err) => ({ type: "error", error: err as ApiEmpty } satisfies IpcResult<T>));
 }

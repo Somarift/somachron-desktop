@@ -29,3 +29,13 @@ pub async fn create_folder(token: &str, space_id: &str, path: &str) -> CommandRe
 pub async fn delete_path(token: &str, space_id: &str, path: &str) -> CommandResult {
     super::delete(format!("/media/p/{path}"), token, Some(space_id)).await
 }
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_thumbnail(token: &str, space_id: &str, file_id: &str) -> CommandResult {
+    super::get(format!("/media/f/{file_id}"), token, Some(space_id)).await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn get_stream_signed_url(token: &str, space_id: &str, file_id: &str) -> CommandResult {
+    super::get(format!("/media/stream/{file_id}"), token, Some(space_id)).await
+}

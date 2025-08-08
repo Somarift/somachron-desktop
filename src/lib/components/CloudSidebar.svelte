@@ -32,7 +32,9 @@
                                     class="flex items-center gap-2"
                                     {...props}
                                     onclick={() => {
-                                        sidebar.toggle();
+                                        if (sidebar.isMobile) {
+                                            sidebar.toggle();
+                                        }
                                     }}
                                 >
                                     <BookImage class="size-4" />
@@ -58,7 +60,9 @@
                                                 href={`${Routes.Cloud}/${subItem.space.id}`}
                                                 {...props}
                                                 onclick={() => {
-                                                    sidebar.toggle();
+                                                    if (sidebar.isMobile) {
+                                                        sidebar.toggle();
+                                                    }
                                                 }}
                                             >
                                                 <span>

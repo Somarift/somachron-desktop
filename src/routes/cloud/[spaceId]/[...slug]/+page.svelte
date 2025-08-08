@@ -15,6 +15,7 @@
     import { onDestroy, onMount } from "svelte";
     import { useClerkContext } from "svelte-clerk/client";
     import { folderViewState } from "./state.svelte.js";
+    import MediaViewer from "$lib/components/MediaViewer.svelte";
 
     const ctx = useClerkContext();
 
@@ -199,12 +200,12 @@
                             <ContextMenu.Trigger
                                 class="relative group rounded-lg overflow-hidden cursor-pointer"
                             >
-                                <!-- <MediaViewer
+                                <MediaViewer
                                     bind:streamUrls
                                     files={files.map((f) => f.file)}
                                     index={i}
                                     {spaceId}
-                                /> -->
+                                />
                                 <div
                                     class="absolute bottom-0 left-0 right-0 bg-black/30 text-white text-sm px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity truncate"
                                 >

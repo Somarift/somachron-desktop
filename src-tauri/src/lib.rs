@@ -20,6 +20,8 @@ pub fn run() {
             storage::list_dir_items,
             storage::create_folder,
             storage::delete_path,
+            storage::get_thumbnail,
+            storage::get_stream_signed_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
