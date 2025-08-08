@@ -24,3 +24,8 @@ pub async fn create_folder(token: &str, space_id: &str, path: &str) -> CommandRe
     )
     .await
 }
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn delete_path(token: &str, space_id: &str, path: &str) -> CommandResult {
+    super::delete(format!("/media/p/{path}"), token, Some(space_id)).await
+}

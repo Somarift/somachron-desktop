@@ -37,3 +37,7 @@ export async function listDirItems(token: string, spaceId: string, path: string)
 export async function createFolder(token: string, spaceId: string, path: string): Promise<IpcResult<any>> {
     return mapIpcVoid(invoke('create_folder', { token, space_id: spaceId, path }));
 }
+
+export async function deletePath(token: string, spaceId: string, path: string): Promise<IpcResult<any>> {
+    return mapIpcVoid(invoke('delete_path', { token, space_id: spaceId, path }));
+}

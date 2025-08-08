@@ -4,6 +4,7 @@
     import { listDirItems, type FileEntry } from "$lib/api/storage";
     import BrowsePath from "$lib/components/BrowsePath.svelte";
     import CreateFolderDialog from "$lib/components/CreateFolderDialog.svelte";
+    import DeletePathDialog from "$lib/components/DeletePathDialog.svelte";
     import PageHeader from "$lib/components/PageHeader.svelte";
     import { Button } from "$lib/components/ui/button/index.js";
     import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -14,8 +15,6 @@
     import { onDestroy, onMount } from "svelte";
     import { useClerkContext } from "svelte-clerk/client";
     import { folderViewState } from "./state.svelte.js";
-
-    let { data } = $props();
 
     const ctx = useClerkContext();
 
@@ -179,11 +178,11 @@
                         </ContextMenu.Trigger>
                         <ContextMenu.Content>
                             <ContextMenu.Item closeOnSelect={false}>
-                                <!-- <DeletePathDialog
+                                <DeletePathDialog
                                     disabled={currentSpace?.role !== "owner" &&
                                         currentSpace?.role !== "modify"}
                                     path={`${currentPath}/${item.name}`}
-                                /> -->
+                                />
                             </ContextMenu.Item>
                         </ContextMenu.Content>
                     </ContextMenu.Root>
@@ -214,12 +213,12 @@
                             </ContextMenu.Trigger>
                             <ContextMenu.Content>
                                 <ContextMenu.Item closeOnSelect={false}>
-                                    <!-- <DeletePathDialog
+                                    <DeletePathDialog
                                         disabled={currentSpace?.role !==
                                             "owner" &&
                                             currentSpace?.role !== "modify"}
                                         path={`${currentPath}/${item.file.file_name}`}
-                                    /> -->
+                                    />
                                 </ContextMenu.Item>
                             </ContextMenu.Content>
                         </ContextMenu.Root>

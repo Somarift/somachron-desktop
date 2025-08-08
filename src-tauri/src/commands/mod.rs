@@ -86,6 +86,20 @@ async fn post<B: Serialize>(
     handle_response(res).await
 }
 
+async fn delete(api: impl Into<String>, token: &str, space_id: Option<&str>) -> CommandResult {
+    let client = reqwest::Client::new();
+    let res = client
+        .delete(format!("{API_URL}{}", api.into()))
+        .bearer_auth(token)
+        .header("Content-Type", "application/json")
+        .header(SPACE_ID_HEADER, space_id.unwrap_or(""))
+        .send()
+        .await
+        .map_err(IpcResult::err)?;
+
+    handle_response(res).await
+}
+
 async fn handle_response(res: reqwest::Response) -> CommandResult {
     let content_length = res.content_length().unwrap_or(0);
     if content_length == 0 {
