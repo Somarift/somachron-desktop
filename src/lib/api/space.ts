@@ -1,6 +1,6 @@
 import type { IpcResult } from "$lib/models/api";
 import { invoke } from "@tauri-apps/api/core";
-import { mapIpcResult } from "./api-utils";
+import { mapIpcResult, mapIpcVoid } from "./api-utils";
 import { emptyUserProfile, type UserProfile } from "./user";
 
 export type SpaceRole = "owner" | "read" | "upload" | "modify";
@@ -48,6 +48,10 @@ export function emptySpaceUser() {
         role: "read",
         user: emptyUserProfile(),
     } satisfies SpaceUser;
+}
+
+export async function createSpace(token: string, name: string, desc: string): Promise<IpcResult<any>> {
+    return mapIpcVoid(invoke('create_space', { token, name, description: desc }))
 }
 
 export async function getUserSpaces(token: string): Promise<IpcResult<SpaceMember[]>> {

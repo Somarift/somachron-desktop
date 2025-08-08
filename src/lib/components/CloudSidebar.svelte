@@ -8,6 +8,8 @@
     import * as Sidebar from "./ui/sidebar";
 
     let open = $state(true);
+
+    const sidebar = Sidebar.useSidebar();
 </script>
 
 <Sidebar.Group>
@@ -29,6 +31,9 @@
                                     href={Routes.Cloud}
                                     class="flex items-center gap-2"
                                     {...props}
+                                    onclick={() => {
+                                        sidebar.toggle();
+                                    }}
                                 >
                                     <BookImage class="size-4" />
                                     <span>Spaces</span>
@@ -52,6 +57,9 @@
                                             <a
                                                 href={`${Routes.Cloud}/${subItem.space.id}`}
                                                 {...props}
+                                                onclick={() => {
+                                                    sidebar.toggle();
+                                                }}
                                             >
                                                 <span>
                                                     {subItem.space.name}

@@ -16,6 +16,7 @@ pub fn run() {
             user::get_user_profile,
             space::get_user_spaces,
             space::get_space_users,
+            space::create_space,
             storage::list_dir_items,
         ])
         .run(tauri::generate_context!())

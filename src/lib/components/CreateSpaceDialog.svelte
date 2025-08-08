@@ -7,13 +7,18 @@
     import * as AlertDialog from "./ui/alert-dialog";
     import { Input } from "./ui/input";
     import { buttonVariants } from "./ui/button";
+    import { createSpace, getUserSpaces } from "$lib/api/space";
+    import { useClerkContext } from "svelte-clerk";
+    import { spaces } from "$lib/states";
+    import { validateApiFront } from "$lib/utils";
 
     let { isSidebar, ...props } = $props();
+
+    const ctx = useClerkContext();
 
     let spaceName = $state("");
     let spaceDesc = $state("");
     let loading = $state(false);
-    let createSpaceForm: any = $state();
     let dialogOpen = $state(false);
 
     function validateFolderName() {
@@ -27,13 +32,26 @@
         }
     }
 
-    async function handleOnComplete(result: ActionResult) {
-        if (result.type === "failure") {
-            let err = result.data;
-            toast.error(err?.error || "Something went wrong");
-        }
-        if (result.type === "success") {
-            toast.success("Space created");
+    async function createSpaceForm() {
+        loading = true;
+
+        const token = await ctx.session?.getToken();
+        if (token) {
+            let result = await createSpace(
+                token,
+                spaceName.trim(),
+                spaceDesc.trim(),
+            );
+            if (result.type === "error") {
+                toast.error(
+                    `[${result.error.status}] ${result.error.message} - Failed to create space`,
+                );
+            } else {
+                $spaces = await validateApiFront(getUserSpaces(token), []);
+                toast.success("Space created");
+            }
+        } else {
+            toast.error("No auth token");
         }
 
         await invalidateAll();
@@ -42,32 +60,12 @@
     }
 </script>
 
-<form
-    bind:this={createSpaceForm}
-    action="/?/createSpace"
-    method="POST"
-    use:enhance={({ formData }) => {
-        loading = true;
-        validateFolderName();
-
-        formData.set("name", spaceName.trim());
-        formData.set("desc", spaceDesc.trim());
-
-        return async ({ update, result }) => {
-            update({
-                invalidateAll: true,
-                reset: true,
-            });
-            await handleOnComplete(result);
-        };
-    }}
-></form>
-
 <AlertDialog.Root
     bind:open={dialogOpen}
     onOpenChange={(open) => {
         if (!open) {
             spaceName = "";
+            spaceDesc = "";
             loading = false;
         }
     }}
@@ -118,9 +116,7 @@
             <AlertDialog.Action
                 disabled={spaceName.length === 0 || loading}
                 onclick={() => {
-                    if (createSpaceForm) {
-                        createSpaceForm.dispatchEvent(new Event("submit"));
-                    }
+                    createSpaceForm();
                 }}
             >
                 Create

@@ -1,4 +1,3 @@
-use reqwest::Response;
 use serde::{Deserialize, Serialize};
 
 pub mod space;
@@ -25,7 +24,7 @@ pub struct IpcResult {
 }
 
 impl IpcResult {
-    pub async fn from_res(res: Response) -> Result<Self, Self> {
+    pub async fn from_res(res: reqwest::Response) -> Result<Self, Self> {
         let req_id = res
             .headers()
             .get(REQ_ID_HEADER)
@@ -64,6 +63,30 @@ async fn get(api: impl Into<String>, token: &str, space_id: Option<&str>) -> Com
         .await
         .map_err(IpcResult::err)?;
 
+    handle_response(res).await
+}
+
+async fn post<B: Serialize>(
+    api: impl Into<String>,
+    token: &str,
+    space_id: Option<&str>,
+    body: B,
+) -> CommandResult {
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{API_URL}{}", api.into()))
+        .bearer_auth(token)
+        .header("Content-Type", "application/json")
+        .header(SPACE_ID_HEADER, space_id.unwrap_or(""))
+        .json(&body)
+        .send()
+        .await
+        .map_err(IpcResult::err)?;
+
+    handle_response(res).await
+}
+
+async fn handle_response(res: reqwest::Response) -> CommandResult {
     let content_length = res.content_length().unwrap_or(0);
     if content_length == 0 {
         return Err(IpcResult {
