@@ -102,6 +102,9 @@
             <CreateFolderDialog
                 disabled={currentSpace?.role !== "owner" &&
                     currentSpace?.role !== "modify"}
+                onCreate={() => {
+                    entries = [];
+                }}
             />
             <!-- <UploadDialog
                 disabled={currentSpace?.role !== "owner" &&

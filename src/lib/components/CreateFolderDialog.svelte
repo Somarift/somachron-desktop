@@ -1,22 +1,23 @@
 <script lang="ts">
-    import { enhance } from "$app/forms";
     import { invalidateAll } from "$app/navigation";
     import { page } from "$app/state";
+    import { createFolder } from "$lib/api/storage";
     import { FolderPlus } from "@lucide/svelte";
-    import type { ActionResult } from "@sveltejs/kit";
+    import { useClerkContext } from "svelte-clerk";
     import { toast } from "svelte-sonner";
     import * as AlertDialog from "./ui/alert-dialog";
     import { buttonVariants } from "./ui/button";
     import { Input } from "./ui/input";
-    import type { ApiEmpty } from "$lib/models/api";
 
-    let { disabled }: { disabled: boolean } = $props();
+    let { disabled, onCreate }: { disabled: boolean; onCreate: () => void } =
+        $props();
+
+    const ctx = useClerkContext();
 
     let uploadPath = $derived(`/${page.params.slug}`);
 
     let folderName = $state("");
     let loading = $state(false);
-    let createFolderForm: any = $state();
     let dialogOpen = $state(false);
 
     function validateFolderName() {
@@ -30,14 +31,26 @@
         }
     }
 
-    async function handleOnComplete(result: ActionResult) {
-        if (result.type === "failure") {
-            let data = result.data;
-            let err = data?.err as ApiEmpty | undefined;
-            toast.error(err?.message || "Something went wrong");
-        }
-        if (result.type === "success") {
-            toast.success("Folder created");
+    async function createFolderForm() {
+        loading = true;
+
+        const token = await ctx.session?.getToken();
+        if (token) {
+            let result = await createFolder(
+                token,
+                page.params.spaceId,
+                encodeURI(`${uploadPath}/${folderName.trim()}`),
+            );
+            if (result.type === "error") {
+                toast.error(
+                    `[${result.error.status}] ${result.error.message} - Failed to create folder`,
+                );
+            } else {
+                onCreate();
+                toast.success("Folder created");
+            }
+        } else {
+            toast.error("No auth token");
         }
 
         await invalidateAll();
@@ -46,26 +59,6 @@
         dialogOpen = false;
     }
 </script>
-
-<form
-    bind:this={createFolderForm}
-    action="?/createFolder"
-    method="POST"
-    use:enhance={({ formData }) => {
-        loading = true;
-        validateFolderName();
-
-        formData.set("folder", `${uploadPath}/${folderName.trim()}`);
-
-        return async ({ update, result }) => {
-            update({
-                invalidateAll: true,
-                reset: true,
-            });
-            await handleOnComplete(result);
-        };
-    }}
-></form>
 
 <AlertDialog.Root
     bind:open={dialogOpen}
@@ -106,9 +99,7 @@
             <AlertDialog.Action
                 disabled={folderName.length === 0 || loading}
                 onclick={() => {
-                    if (createFolderForm) {
-                        createFolderForm.dispatchEvent(new Event("submit"));
-                    }
+                    createFolderForm();
                 }}
             >
                 Create

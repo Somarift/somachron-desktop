@@ -18,6 +18,7 @@ pub fn run() {
             space::get_space_users,
             space::create_space,
             storage::list_dir_items,
+            storage::create_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,16 +1,14 @@
 <script lang="ts">
-    import { enhance } from "$app/forms";
     import { invalidateAll } from "$app/navigation";
-    import { Plus } from "@lucide/svelte";
-    import type { ActionResult } from "@sveltejs/kit";
-    import { toast } from "svelte-sonner";
-    import * as AlertDialog from "./ui/alert-dialog";
-    import { Input } from "./ui/input";
-    import { buttonVariants } from "./ui/button";
     import { createSpace, getUserSpaces } from "$lib/api/space";
-    import { useClerkContext } from "svelte-clerk";
     import { spaces } from "$lib/states";
     import { validateApiFront } from "$lib/utils";
+    import { Plus } from "@lucide/svelte";
+    import { useClerkContext } from "svelte-clerk";
+    import { toast } from "svelte-sonner";
+    import * as AlertDialog from "./ui/alert-dialog";
+    import { buttonVariants } from "./ui/button";
+    import { Input } from "./ui/input";
 
     let { isSidebar, ...props } = $props();
 
