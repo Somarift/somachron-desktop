@@ -2,7 +2,7 @@
     "$schema": "https://schema.tauri.app/config/2",
     "productName": "somachron",
     "version": "0.1.0",
-    "identifier": "com.shank.somachron-app",
+    "identifier": "com.shank03.somachron",
     "build": {
         "beforeDevCommand": "bun run dev",
         "devUrl": "http://localhost:1420",
@@ -31,7 +31,7 @@
             }
         ],
         "security": {
-            "csp": "default-src 'self' ipc: http://ipc.localhost; connect-src 'self' https://clerk.*.com https://*.clerk.accounts.dev; img-src 'self' asset: http://asset.localhost"
+            "csp": "default-src 'self' ipc: http://ipc.localhost; worker-src 'self' blob: tauri://localhost/*; connect-src 'self' https://clerk.somachron.shank03.com https://*.clerk.accounts.dev; script-src 'self' https://clerk.somachron.shank03.com; img-src 'self' asset: http://asset.localhost; style-src 'unsafe-inline' 'self' https://fonts.googleapis.com"
         }
     },
     "bundle": {
