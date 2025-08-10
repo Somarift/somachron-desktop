@@ -10,10 +10,6 @@ export const handle: Handle = async ({ event, resolve }) => {
     const sessionCookie = event.cookies.get(SESSION_TOKEN);
     const isProtected = PROTECTED_ROUTES.find((p) => event.url.pathname.startsWith(p));
 
-    event.locals.accessToken = sessionCookie;
-
-    console.log(event.url.pathname, sessionCookie?.length)
-
     if (sessionCookie) {
         try {
             const _ = await verifySession(sessionCookie);
