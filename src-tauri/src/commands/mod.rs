@@ -1,12 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+pub mod auth;
 pub mod space;
 pub mod storage;
 pub mod user;
 
 pub type CommandResult = Result<tauri::ipc::Response, IpcResult>;
 
-pub const API_URL: &str = "http://localhost:8080/v1";
+pub const API_URL: &str = "https://api-somachron.shank03.com/v1";
 pub const REQ_ID_HEADER: &str = "x-sc-id";
 pub const SPACE_ID_HEADER: &str = "X-Space-ID";
 
@@ -41,8 +42,36 @@ impl IpcResult {
         })
     }
 
+    #[track_caller]
+    pub fn message(message: impl Into<String>) -> Self {
+        let message = message.into();
+
+        let location = std::panic::Location::caller();
+        log::error!(
+            "Error [{}:{}:{}]: {}",
+            location.file(),
+            location.line(),
+            location.column(),
+            message,
+        );
+
+        Self {
+            status: 400,
+            message,
+            req_id: "".into(),
+        }
+    }
+
+    #[track_caller]
     pub fn err(err: impl std::error::Error) -> Self {
-        log::error!("Error: {}", err);
+        let location = std::panic::Location::caller();
+        log::error!(
+            "Error [{}:{}:{}]: {}",
+            location.file(),
+            location.line(),
+            location.column(),
+            err
+        );
 
         Self {
             status: 500,
