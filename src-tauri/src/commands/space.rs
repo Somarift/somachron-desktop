@@ -1,4 +1,7 @@
 use serde::Serialize;
+use tauri::State;
+
+use crate::clerk::ClerkState;
 
 use super::CommandResult;
 
@@ -9,15 +12,21 @@ struct CreateSpace {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn get_user_spaces(token: &str) -> CommandResult {
-    super::get("/space", token, None).await
+pub async fn get_user_spaces(clerk: State<'_, ClerkState>) -> CommandResult {
+    let token = clerk.get_token().await?;
+    super::get("/space", &token, None).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn create_space(token: &str, name: &str, description: &str) -> CommandResult {
+pub async fn create_space(
+    clerk: State<'_, ClerkState>,
+    name: &str,
+    description: &str,
+) -> CommandResult {
+    let token = clerk.get_token().await?;
     super::post(
         "/space",
-        token,
+        &token,
         None,
         CreateSpace {
             name: name.to_owned(),
@@ -28,6 +37,7 @@ pub async fn create_space(token: &str, name: &str, description: &str) -> Command
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn get_space_users(token: &str, space_id: &str) -> CommandResult {
-    super::get("/space/users", token, Some(space_id)).await
+pub async fn get_space_users(clerk: State<'_, ClerkState>, space_id: &str) -> CommandResult {
+    let token = clerk.get_token().await?;
+    super::get("/space/users", &token, Some(space_id)).await
 }

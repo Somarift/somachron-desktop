@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use serde::Deserialize;
+use base64::Engine;
+use serde::{Deserialize, Serialize};
+use tauri::AppHandle;
+use tauri_plugin_store::StoreExt;
 use tokio::sync::RwLock;
 
 use crate::commands::IpcResult;
@@ -14,15 +17,21 @@ const COOKIE_HEADER: &str = "Cookie";
 const CONTENT_TYPE_HEADER: &str = "Content-Type";
 const FORM_DATA_TYPE: &str = "application/x-www-form-urlencoded";
 
+const APP_SETTINGS: &str = "clerk.json";
+const COOKIE_SETTING: &str = "cookies";
+const CLIENT_SETTING: &str = "client_id";
+const SESSION_SETTING: &str = "session_id";
+
 pub type ClerkState = Arc<Clerk>;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Cookie {
     value: String,
     expires: u64,
 }
 
 pub struct Clerk {
+    app: AppHandle,
     client: reqwest::Client,
     cookies: Arc<RwLock<BTreeMap<String, Cookie>>>,
 
@@ -33,7 +42,7 @@ pub struct Clerk {
 }
 
 impl Clerk {
-    pub fn init() -> Arc<Self> {
+    pub fn init(app: AppHandle) -> Arc<Self> {
         let client = reqwest::ClientBuilder::new()
             .default_headers({
                 let mut headers = reqwest::header::HeaderMap::new();
@@ -45,12 +54,26 @@ impl Clerk {
             .build()
             .unwrap();
 
+        let store = app.store(APP_SETTINGS).expect("Failed to create store");
+
+        let cookies = store
+            .get(COOKIE_SETTING)
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or(BTreeMap::new());
+        let client_id = store
+            .get(CLIENT_SETTING)
+            .and_then(|v| serde_json::from_value(v).ok());
+        let session_id = store
+            .get(SESSION_SETTING)
+            .and_then(|v| serde_json::from_value(v).ok());
+
         Arc::new(Self {
+            app,
             client,
-            cookies: Arc::new(RwLock::new(BTreeMap::new())),
-            client_id: Arc::new(RwLock::new(None)),
+            cookies: Arc::new(RwLock::new(cookies)),
+            client_id: Arc::new(RwLock::new(client_id)),
             sign_in_id: Arc::new(RwLock::new(None)),
-            session_id: Arc::new(RwLock::new(None)),
+            session_id: Arc::new(RwLock::new(session_id)),
             token: Arc::new(RwLock::new(None)),
         })
     }
@@ -113,6 +136,7 @@ impl Clerk {
             self.update_cookies(cookies, data.response.cookie_expires_at)
                 .await;
         }
+
         Ok(())
     }
 
@@ -237,7 +261,36 @@ impl Clerk {
         }
     }
 
-    pub async fn get_token(&self) -> Result<(), IpcResult> {
+    pub async fn get_token(&self) -> Result<String, IpcResult> {
+        let gt = self.token.read().await;
+        let token = match &*gt {
+            Some(token) => token.clone(),
+            None => return Err(IpcResult::message("No token !")),
+        };
+        drop(gt);
+
+        let payload = match token.split('.').nth(1) {
+            Some(p) => base64::prelude::BASE64_STANDARD_NO_PAD
+                .decode(p)
+                .map_err(IpcResult::err)?,
+            None => return Err(IpcResult::message("Invalid token")),
+        };
+
+        let __JwtClaims { exp } = serde_json::from_slice(&payload).map_err(IpcResult::err)?;
+        let current_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .and_then(|v| Ok(v.as_secs()))
+            .unwrap_or(1);
+
+        if current_secs > exp {
+            log::info!("Fetching token: current: {}, exp: {}", current_secs, exp);
+            return self.fetch_token().await;
+        }
+
+        Ok(token)
+    }
+
+    pub async fn fetch_token(&self) -> Result<String, IpcResult> {
         let g_sid = self.session_id.read().await;
         let sid = match &*g_sid {
             Some(s) => s.clone(),
@@ -262,9 +315,9 @@ impl Clerk {
 
             {
                 let mut gt = self.token.write().await;
-                *gt = Some(data.jwt);
+                *gt = Some(data.jwt.clone());
             }
-            Ok(())
+            Ok(data.jwt)
         } else {
             let err = self.get_error(res).await?;
             Err(err)
@@ -314,6 +367,22 @@ impl Clerk {
                 acc
             })
     }
+
+    pub async fn save_data(&self) {
+        let store = self.app.store(APP_SETTINGS).expect("Failed to open store");
+        store.set(
+            COOKIE_SETTING,
+            serde_json::to_value(&*self.cookies.read().await).unwrap(),
+        );
+        store.set(
+            CLIENT_SETTING,
+            serde_json::to_value(&*self.client_id.read().await).unwrap(),
+        );
+        store.set(
+            SESSION_SETTING,
+            serde_json::to_value(&*self.session_id.read().await).unwrap(),
+        );
+    }
 }
 
 fn extract_cookies(headers: &reqwest::header::HeaderMap) -> BTreeMap<String, Cookie> {
@@ -336,6 +405,11 @@ fn extract_cookies(headers: &reqwest::header::HeaderMap) -> BTreeMap<String, Coo
 }
 
 // ------------------ Payloads ------------------
+
+#[derive(Debug, Deserialize)]
+struct __JwtClaims {
+    exp: u64,
+}
 
 #[derive(Debug, Deserialize)]
 struct __ClerkError {
