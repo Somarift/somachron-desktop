@@ -1,14 +1,13 @@
 <script lang="ts">
-    import { cn, validateApiFront } from "$lib/utils";
-    import { ChevronsUpDownIcon, MoonIcon, SunIcon } from "@lucide/svelte";
-    import { UserButton } from "svelte-clerk";
-    import * as Sidebar from "./ui/sidebar";
-    import { toast } from "svelte-sonner";
-    import { Routes } from "$lib/route";
     import type { UserProfile } from "$lib/api/user";
-    import * as DropdownMenu from "./ui/dropdown-menu";
-    import { buttonVariants } from "./ui/button";
+    import { Routes } from "$lib/route";
+    import { cn } from "$lib/utils";
+    import { MoonIcon, SunIcon } from "@lucide/svelte";
     import { resetMode, setMode } from "mode-watcher";
+    import { toast } from "svelte-sonner";
+    import { buttonVariants } from "./ui/button";
+    import * as DropdownMenu from "./ui/dropdown-menu";
+    import * as Sidebar from "./ui/sidebar";
 
     let { user }: { user: UserProfile } = $props();
 
@@ -21,7 +20,7 @@
             size="lg"
             class="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground hover:bg-sidebar"
         >
-            <UserButton afterSignOutUrl={Routes.SignIn} />
+            <!-- <UserButton afterSignOutUrl={Routes.SignIn} /> -->
             <button
                 class="grid flex-1 text-left text-sm leading-tight"
                 onclick={() => toast.info("Click on profile icon")}
@@ -29,9 +28,9 @@
                 <span class="truncate font-medium">
                     {user.given_name}
                 </span>
-                <span class="truncate text-xs">
+                <!--<span class="truncate text-xs">
                     {user.email}
-                </span>
+                </span>-->
             </button>
             <DropdownMenu.Trigger
                 class={cn(

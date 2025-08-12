@@ -4,15 +4,12 @@
     import { spaces } from "$lib/states";
     import { validateApiFront } from "$lib/utils";
     import { Plus } from "@lucide/svelte";
-    import { useClerkContext } from "svelte-clerk";
     import { toast } from "svelte-sonner";
     import * as AlertDialog from "./ui/alert-dialog";
     import { buttonVariants } from "./ui/button";
     import { Input } from "./ui/input";
 
     let { isSidebar, ...props } = $props();
-
-    const ctx = useClerkContext();
 
     let spaceName = $state("");
     let spaceDesc = $state("");
@@ -33,23 +30,14 @@
     async function createSpaceForm() {
         loading = true;
 
-        const token = await ctx.session?.getToken();
-        if (token) {
-            let result = await createSpace(
-                token,
-                spaceName.trim(),
-                spaceDesc.trim(),
+        let result = await createSpace(spaceName.trim(), spaceDesc.trim());
+        if (result.type === "error") {
+            toast.error(
+                `[${result.error.status}] ${result.error.message} - Failed to create space`,
             );
-            if (result.type === "error") {
-                toast.error(
-                    `[${result.error.status}] ${result.error.message} - Failed to create space`,
-                );
-            } else {
-                $spaces = await validateApiFront(getUserSpaces(token), []);
-                toast.success("Space created");
-            }
         } else {
-            toast.error("No auth token");
+            $spaces = await validateApiFront(getUserSpaces(), []);
+            toast.success("Space created");
         }
 
         await invalidateAll();

@@ -1,7 +1,5 @@
 <script lang="ts">
-    import { Routes } from "$lib/route";
-    import { CloudMoon, Loader2 } from "@lucide/svelte";
-    import { ClerkLoading, UserButton } from "svelte-clerk";
+    import { CloudMoon } from "@lucide/svelte";
     import Skeleton from "./ui/skeleton/skeleton.svelte";
 </script>
 
@@ -22,12 +20,12 @@
         </div>
 
         <div class="flex justify-end items-center">
-            <ClerkLoading>
+            <!--<ClerkLoading>
                 <div class="flex justify-center items-center h-full">
                     <Loader2 class="size-7 text-primary animate-spin" />
                 </div>
             </ClerkLoading>
-            <UserButton showName={true} afterSignOutUrl={Routes.SignIn} />
+            <UserButton showName={true} afterSignOutUrl={Routes.SignIn} />-->
         </div>
     </div>
 </header>

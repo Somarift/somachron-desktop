@@ -50,14 +50,14 @@ export function emptySpaceUser() {
     } satisfies SpaceUser;
 }
 
-export async function createSpace(token: string, name: string, desc: string): Promise<IpcResult<any>> {
-    return mapIpc(invoke('create_space', { token, name, description: desc }), (a) => a as any)
+export async function createSpace(name: string, desc: string): Promise<IpcResult<any>> {
+    return mapIpc(invoke('create_space', { name, description: desc }), (a) => a as any)
 }
 
-export async function getUserSpaces(token: string): Promise<IpcResult<SpaceMember[]>> {
-    return mapIpcResult(invoke('get_user_spaces', { token }))
+export async function getUserSpaces(): Promise<IpcResult<SpaceMember[]>> {
+    return mapIpcResult(invoke('get_user_spaces', {}))
 }
 
-export async function getSpaceUsers(token: string, spaceId: string): Promise<IpcResult<SpaceUser[]>> {
-    return mapIpcResult(invoke('get_space_users', { token, space_id: spaceId }))
+export async function getSpaceUsers(spaceId: string): Promise<IpcResult<SpaceUser[]>> {
+    return mapIpcResult(invoke('get_space_users', { space_id: spaceId }))
 }

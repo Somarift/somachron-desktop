@@ -6,7 +6,6 @@
     } from "$lib/api/storage";
     import { fileExtension, fileName } from "$lib/utils";
     import { Image, Play, Video } from "@lucide/svelte";
-    import { useClerkContext } from "svelte-clerk";
     import Badge from "./ui/badge/badge.svelte";
     import * as Dialog from "./ui/dialog";
     import { Skeleton } from "./ui/skeleton";
@@ -23,8 +22,6 @@
         spaceId: string;
     } = $props();
 
-    const ctx = useClerkContext();
-
     let currentIndex = $state(index);
     let currentItem = $state(files[index]);
     let item = $derived(files[index]);
@@ -36,31 +33,22 @@
         if (url && url.length > 0) {
             return url;
         }
-        const token = await ctx.session?.getToken();
-        if (token) {
-            const res = await getStreamSignedUrl(
-                token,
-                spaceId,
-                currentItem.id,
-            );
-            if (res.type === "success") {
-                streamUrls[currentIndex] = res.data.url;
-                streamUrls = streamUrls;
-                return res.data.url;
-            }
+
+        const res = await getStreamSignedUrl(spaceId, currentItem.id);
+        if (res.type === "success") {
+            streamUrls[currentIndex] = res.data.url;
+            streamUrls = streamUrls;
+            return res.data.url;
         }
 
         return "";
     }
 
     async function getThumbnailImage() {
-        const token = await ctx.session?.getToken();
-        if (token) {
-            const result = await getThumbnail(token, spaceId, item.id);
-            if (result.type === "success") {
-                const blob = new Blob([result.data]);
-                return URL.createObjectURL(blob);
-            }
+        const result = await getThumbnail(spaceId, item.id);
+        if (result.type === "success") {
+            const blob = new Blob([result.data]);
+            return URL.createObjectURL(blob);
         }
         return "";
     }
@@ -136,7 +124,7 @@
                         loading="lazy"
                         src={url}
                         alt={currentItem.file_name}
-                        class="w-auto h-full object-contain rounded-lg transition-all"
+                        class="w-full h-full object-contain rounded-lg transition-all"
                     />
                 {:else if currentItem.media_type === "video"}
                     <video

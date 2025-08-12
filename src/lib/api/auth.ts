@@ -1,9 +1,13 @@
 import type { IpcResult } from "$lib/models/api";
 import { invoke } from "@tauri-apps/api/core";
-import { mapIpc } from "./api-utils";
+import { decodeText, mapIpc } from "./api-utils";
 
 export async function setupClient(): Promise<IpcResult<any>> {
     return mapIpc(invoke('setup_client', {}), (a) => a as any);
+}
+
+export async function validateAuth(): Promise<IpcResult<string>> {
+    return mapIpc(invoke('validate_auth', {}), (a) => decodeText(a));
 }
 
 export async function signIn(email: string): Promise<IpcResult<any>> {

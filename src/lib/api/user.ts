@@ -36,6 +36,6 @@ export function emptyPlatformUser() {
     } satisfies PlatformUser;
 }
 
-export async function getUserProfile(token: string): Promise<IpcResult<UserProfile>> {
-    return mapIpcResult(invoke('get_user_profile', { token }));
+export async function getUserProfile(): Promise<IpcResult<UserProfile>> {
+    return mapIpcResult(invoke('get_user_profile', {}));
 }

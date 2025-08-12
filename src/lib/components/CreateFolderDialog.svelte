@@ -3,7 +3,6 @@
     import { page } from "$app/state";
     import { createFolder } from "$lib/api/storage";
     import { FolderPlus } from "@lucide/svelte";
-    import { useClerkContext } from "svelte-clerk";
     import { toast } from "svelte-sonner";
     import * as AlertDialog from "./ui/alert-dialog";
     import { buttonVariants } from "./ui/button";
@@ -11,8 +10,6 @@
 
     let { disabled, onCreate }: { disabled: boolean; onCreate: () => void } =
         $props();
-
-    const ctx = useClerkContext();
 
     let uploadPath = $derived(`/${page.params.slug}`);
 
@@ -34,23 +31,17 @@
     async function createFolderForm() {
         loading = true;
 
-        const token = await ctx.session?.getToken();
-        if (token) {
-            let result = await createFolder(
-                token,
-                page.params.spaceId,
-                encodeURI(`${uploadPath}/${folderName.trim()}`),
+        let result = await createFolder(
+            page.params.spaceId,
+            encodeURI(`${uploadPath}/${folderName.trim()}`),
+        );
+        if (result.type === "error") {
+            toast.error(
+                `[${result.error.status}] ${result.error.message} - Failed to create folder`,
             );
-            if (result.type === "error") {
-                toast.error(
-                    `[${result.error.status}] ${result.error.message} - Failed to create folder`,
-                );
-            } else {
-                onCreate();
-                toast.success("Folder created");
-            }
         } else {
-            toast.error("No auth token");
+            onCreate();
+            toast.success("Folder created");
         }
 
         await invalidateAll();

@@ -3,14 +3,11 @@
     import { page } from "$app/state";
     import { deletePath } from "$lib/api/storage";
     import { Delete } from "@lucide/svelte";
-    import { useClerkContext } from "svelte-clerk";
     import { toast } from "svelte-sonner";
     import * as AlertDialog from "./ui/alert-dialog";
     import { buttonVariants } from "./ui/button";
 
     let { path, disabled }: { path: string; disabled: boolean } = $props();
-
-    const ctx = useClerkContext();
 
     let loading = $state(false);
     let dialogOpen = $state(false);
@@ -18,22 +15,13 @@
     async function deletePathForm() {
         loading = true;
 
-        const token = await ctx.session?.getToken();
-        if (token) {
-            let result = await deletePath(
-                token,
-                page.params.spaceId,
-                encodeURI(path),
+        let result = await deletePath(page.params.spaceId, encodeURI(path));
+        if (result.type === "error") {
+            toast.error(
+                `[${result.error.status}] ${result.error.message} - Failed to create folder`,
             );
-            if (result.type === "error") {
-                toast.error(
-                    `[${result.error.status}] ${result.error.message} - Failed to create folder`,
-                );
-            } else {
-                toast.success("Folder created");
-            }
         } else {
-            toast.error("No auth token");
+            toast.success("Folder created");
         }
 
         await invalidateAll();

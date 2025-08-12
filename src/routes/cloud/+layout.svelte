@@ -6,23 +6,17 @@
     import * as Sidebar from "$lib/components/ui/sidebar";
     import { spaces, user } from "$lib/states";
     import { validateApiFront } from "$lib/utils";
-    import { useClerkContext } from "svelte-clerk/client";
 
     let { children } = $props();
 
-    const ctx = useClerkContext();
-
     $effect(() => {
         const fetchData = async () => {
-            const token = await ctx.session?.getToken();
-            if (token) {
-                $user = await validateApiFront(
-                    getUserProfile(token),
-                    emptyUserProfile(),
-                );
+            $user = await validateApiFront(
+                getUserProfile(),
+                emptyUserProfile(),
+            );
 
-                $spaces = await validateApiFront(getUserSpaces(token), []);
-            }
+            $spaces = await validateApiFront(getUserSpaces(), []);
         };
         fetchData();
     });

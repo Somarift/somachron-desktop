@@ -30,22 +30,22 @@ export interface FileMeta {
 
 export type FileEntry = | { tag: 'dir'; name: string } | { tag: 'file'; file: FileMeta };
 
-export async function listDirItems(token: string, spaceId: string, path: string): Promise<IpcResult<FileEntry[]>> {
-    return mapIpcResult(invoke('list_dir_items', { token, space_id: spaceId, path }));
+export async function listDirItems(spaceId: string, path: string): Promise<IpcResult<FileEntry[]>> {
+    return mapIpcResult(invoke('list_dir_items', { space_id: spaceId, path }));
 }
 
-export async function createFolder(token: string, spaceId: string, path: string): Promise<IpcResult<any>> {
-    return mapIpc(invoke('create_folder', { token, space_id: spaceId, path }), (a) => a as any);
+export async function createFolder(spaceId: string, path: string): Promise<IpcResult<any>> {
+    return mapIpc(invoke('create_folder', { space_id: spaceId, path }), (a) => a as any);
 }
 
-export async function deletePath(token: string, spaceId: string, path: string): Promise<IpcResult<any>> {
-    return mapIpc(invoke('delete_path', { token, space_id: spaceId, path }), (a) => a as any);
+export async function deletePath(spaceId: string, path: string): Promise<IpcResult<any>> {
+    return mapIpc(invoke('delete_path', { space_id: spaceId, path }), (a) => a as any);
 }
 
-export async function getThumbnail(token: string, spaceId: string, fileId: string): Promise<IpcResult<ArrayBuffer>> {
-    return mapIpc(invoke('get_thumbnail', { token, space_id: spaceId, file_id: fileId }), (a) => a);
+export async function getThumbnail(spaceId: string, fileId: string): Promise<IpcResult<ArrayBuffer>> {
+    return mapIpc(invoke('get_thumbnail', { space_id: spaceId, file_id: fileId }), (a) => a);
 }
 
-export async function getStreamSignedUrl(token: string, spaceId: string, fileId: string): Promise<IpcResult<SignedUrl>> {
-    return mapIpcResult(invoke('get_stream_signed_url', { token, space_id: spaceId, file_id: fileId }));
+export async function getStreamSignedUrl(spaceId: string, fileId: string): Promise<IpcResult<SignedUrl>> {
+    return mapIpcResult(invoke('get_stream_signed_url', { space_id: spaceId, file_id: fileId }));
 }

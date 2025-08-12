@@ -51,8 +51,8 @@
 
         let result = await attemptFactor(otp.trim());
         if (result.type === "success") {
-            // goto(Routes.Cloud, { invalidateAll: true, replaceState: true });
             toast.success("Logged in !");
+            goto(Routes.Cloud, { invalidateAll: true, replaceState: true });
         } else {
             signInError = result.error.message;
         }

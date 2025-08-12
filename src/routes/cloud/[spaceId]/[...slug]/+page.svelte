@@ -13,11 +13,8 @@
     import { cn, validateApiFront } from "$lib/utils";
     import { Folder, Grid2X2, Images, Rows3 } from "@lucide/svelte";
     import { onDestroy, onMount } from "svelte";
-    import { useClerkContext } from "svelte-clerk/client";
     import { folderViewState } from "./state.svelte.js";
     import MediaViewer from "$lib/components/MediaViewer.svelte";
-
-    const ctx = useClerkContext();
 
     let currentPath = $derived(page.params.slug);
     let spaceId = $derived(page.params.spaceId);
@@ -29,18 +26,12 @@
         currentPath = page.params.slug;
 
         const fetchData = async () => {
-            const token = await ctx.session?.getToken();
-            if (token) {
-                spaceUsers = await validateApiFront(
-                    getSpaceUsers(token, spaceId),
-                    [],
-                );
+            spaceUsers = await validateApiFront(getSpaceUsers(spaceId), []);
 
-                entries = await validateApiFront(
-                    listDirItems(token, spaceId, `/${currentPath}`),
-                    [],
-                );
-            }
+            entries = await validateApiFront(
+                listDirItems(spaceId, `/${currentPath}`),
+                [],
+            );
         };
         fetchData();
     });
