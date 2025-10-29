@@ -28,10 +28,18 @@ pub enum AuthClientEvent {
     Setup(Result<(), AppError>),
 }
 
+#[derive(Debug, Clone)]
+pub enum SessionState {
+    Validating,
+    SignedIn,
+    LoggedOut,
+}
+
 #[derive(Debug)]
 pub enum AuthEvent {
     Idle,
     Client(AuthClientEvent),
+    Session(SessionState),
 }
 
 pub struct Auth {
@@ -278,7 +286,7 @@ impl InnerAuth {
         })
     }
 
-    pub async fn get_token(&self) -> Result<String, AppError> {
+    pub async fn get_token(&self) -> Result<(), AppError> {
         tokio_rt(async move {
             let gt = self.token.read().unwrap();
             let token = match &*gt {
@@ -305,11 +313,11 @@ impl InnerAuth {
                 return self.fetch_token().await;
             }
 
-            Ok(token)
+            Ok(())
         })
     }
 
-    pub async fn fetch_token(&self) -> Result<String, AppError> {
+    pub async fn fetch_token(&self) -> Result<(), AppError> {
         tokio_rt(async move {
             let rl = self.session_id.read().unwrap();
             let sid = match &*rl {
@@ -335,9 +343,9 @@ impl InnerAuth {
 
                 {
                     let mut gt = self.token.write().unwrap();
-                    *gt = Some(data.jwt.clone());
+                    *gt = Some(data.jwt);
                 }
-                Ok(data.jwt)
+                Ok(())
             } else {
                 let err = self.get_error(res).await?;
                 Err(err)

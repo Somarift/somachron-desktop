@@ -3,7 +3,7 @@ use gpui_component::{notification::Notification, ActiveTheme, ContextModal, Icon
 use header::Header;
 
 use crate::{
-    auth::{Auth, AuthClientEvent, AuthEvent},
+    auth::{Auth, AuthClientEvent, AuthEvent, SessionState},
     err::AppError,
 };
 
@@ -15,6 +15,7 @@ pub struct Rooter {
     header: Entity<Header>,
     auth: Entity<Auth>,
     auth_loading: bool,
+    session_state: Option<SessionState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -47,6 +48,7 @@ impl Rooter {
                             this.auth_loading = false;
                         }
                         Err(err) => {
+                            this.auth_loading = false;
                             window.push_notification(
                                 Notification::error(&err.message)
                                     .title("Failed to setup auth client")
@@ -59,16 +61,26 @@ impl Rooter {
                 AuthEvent::Idle => {
                     this.auth_loading = false;
                 }
+                AuthEvent::Session(state) => {
+                    match state {
+                        SessionState::Validating => (),
+                        _ => {
+                            this.auth_loading = false;
+                        }
+                    };
+                    this.session_state = Some(state.clone());
+                }
             };
             cx.notify();
         });
 
-        Self::setup_client(cx);
+        Self::setup_auth(cx);
 
         Self {
             header,
             auth,
             auth_loading: false,
+            session_state: None,
             _subscriptions: vec![auth_sub],
         }
     }
@@ -77,7 +89,7 @@ impl Rooter {
         cx.new(|cx| Self::new(window, cx))
     }
 
-    pub fn setup_client(cx: &mut Context<Self>) {
+    fn setup_auth(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             // get inner client and prepare event
             let inner = this.update(cx, |this, cx| {
@@ -87,23 +99,58 @@ impl Rooter {
                 })
             });
 
-            // setup
-            let result = match inner {
-                Ok(inner) => {
-                    cx.background_executor()
-                        .spawn(async move { inner.setup_client().await })
-                        .await
+            let inner = match inner {
+                Ok(inner) => inner,
+                Err(err) => {
+                    this.update(cx, |this, cx| {
+                        this.auth.update(cx, |_, cx| {
+                            cx.emit(AuthEvent::Client(AuthClientEvent::Setup(Err(
+                                AppError::gp_err(err),
+                            ))));
+                        });
+                    })
+                    .unwrap();
+                    return;
                 }
-                Err(err) => Err(AppError::gp_err(err)),
             };
 
+            // setup
+            let _inner = inner.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move { _inner.setup_client().await })
+                .await;
+
             // send event
+            let is_ok = result.is_ok();
             this.update(cx, |this, cx| {
                 this.auth.update(cx, |_, cx| {
                     cx.emit(AuthEvent::Client(AuthClientEvent::Setup(result)));
+
+                    if is_ok {
+                        cx.emit(AuthEvent::Session(SessionState::Validating));
+                    }
                 });
             })
             .unwrap();
+
+            if is_ok {
+                let _inner = inner.clone();
+                let result = cx
+                    .background_executor()
+                    .spawn(async move { _inner.fetch_token().await })
+                    .await;
+
+                this.update(cx, |this, cx| {
+                    this.auth.update(cx, |_, cx| {
+                        match result {
+                            Ok(_) => cx.emit(AuthEvent::Session(SessionState::SignedIn)),
+                            Err(_) => cx.emit(AuthEvent::Session(SessionState::LoggedOut)),
+                        };
+                    });
+                })
+                .unwrap();
+            }
         })
         .detach();
     }
@@ -134,7 +181,10 @@ impl Render for Rooter {
                                 Animation::new(std::time::Duration::from_secs(2)).repeat(),
                                 |el, delta| el.transform(Transformation::rotate(percentage(delta))),
                             ))
-                            .child("Loading auth"),
+                            .when_none(&self.session_state, |d| d.child("Loading auth"))
+                            .when_some(self.session_state.clone(), |d, _| {
+                                d.child("Validating session")
+                            }),
                     ),
                 )
             })
@@ -145,7 +195,14 @@ impl Render for Rooter {
                             div()
                                 .text_color(cx.theme().accent_foreground)
                                 .text_lg()
-                                .child("Main content area"),
+                                .child("Main content area")
+                                .when_some(self.session_state.clone(), |d, state| {
+                                    d.child(match state {
+                                        SessionState::SignedIn => "Signed in",
+                                        SessionState::LoggedOut => "Logged out",
+                                        _ => "...",
+                                    })
+                                }),
                         ),
                     ),
                 )
