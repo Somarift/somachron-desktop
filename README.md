@@ -1,7 +1,12 @@
-# Tauri + SvelteKit + TypeScript
+# somachron-desktop
 
-This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
+Created with Create GPUI App.
 
-## Recommended IDE Setup
+- [`gpui`](https://www.gpui.rs/)
+- [GPUI documentation](https://github.com/zed-industries/zed/tree/main/crates/gpui/docs)
+- [GPUI examples](https://github.com/zed-industries/zed/tree/main/crates/gpui/examples)
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
+## Usage
+
+- Ensure Rust is installed - [Rustup](https://rustup.rs/)
+- Run your app with `cargo run`

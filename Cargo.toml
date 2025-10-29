@@ -1,0 +1,23 @@
+[package]
+name = "somachron-desktop"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gpui = { version = "*" }
+gpui-component = { version = "*" }
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+
+anyhow = "1"
+serde = "1"
+serde_json = "1"
+base64 = "0.22.1"
+
+dirs = "6.0.0"
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+
+# smallvec is included here for convenience, it is used by gpui when creating
+# components that can have children. uncomment this line or
+# use `cargo add smallvec` to add it to your project
+# smallvec = "1.13.2"
