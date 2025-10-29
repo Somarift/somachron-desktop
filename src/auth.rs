@@ -92,6 +92,7 @@ impl InnerAuth {
 
         let store = Store::global_get(cx);
         let cookies = store.cookies.clone();
+        let cookies = filter_store_cookies(cookies);
         let client_id = store.client_id.clone();
         let session_id = store.session_id.clone();
 
@@ -404,6 +405,18 @@ impl InnerAuth {
         store.session_id = self.session_id.read().unwrap().clone();
         store.save();
     }
+}
+
+fn filter_store_cookies(cookies: HashMap<String, Cookie>) -> HashMap<String, Cookie> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    cookies
+        .into_iter()
+        .filter(|(_, cookie)| cookie.expires > now)
+        .collect()
 }
 
 fn extract_cookies(headers: &reqwest::header::HeaderMap) -> HashMap<String, Cookie> {
