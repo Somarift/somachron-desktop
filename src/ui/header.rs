@@ -5,19 +5,21 @@ use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt, ThemeMode,
 };
 
-use crate::theme::*;
+use crate::{auth::Auth, theme::*};
 
 const TITLE_BAR_LEFT_PADDING: Pixels = px(80.);
 
-pub struct HeaderUi {}
+pub struct HeaderUi {
+    auth: Entity<Auth>,
+}
 
 impl HeaderUi {
-    pub fn new(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
-        Self {}
+    pub fn new(auth: Entity<Auth>, _window: &mut Window, _cx: &mut Context<Self>) -> Self {
+        Self { auth }
     }
 
-    pub fn view(window: &mut Window, cx: &mut App) -> Entity<Self> {
-        cx.new(|cx| Self::new(window, cx))
+    pub fn view(auth: Entity<Auth>, window: &mut Window, cx: &mut App) -> Entity<Self> {
+        cx.new(|cx| Self::new(auth, window, cx))
     }
 
     pub fn change_mode(&mut self, _: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {

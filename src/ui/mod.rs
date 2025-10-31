@@ -27,7 +27,7 @@ impl Rooter {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let auth = cx.new(|cx| Auth::init(cx));
 
-        let header_ui = HeaderUi::view(window, cx);
+        let header_ui = HeaderUi::view(auth.clone(), window, cx);
         let login_ui = LoginUi::view(auth.clone(), window, cx);
 
         let win_auth = auth.clone();

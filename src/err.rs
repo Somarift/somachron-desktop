@@ -1,14 +1,3 @@
-use serde::{Deserialize, Serialize};
-
-pub const REQ_ID_HEADER: &str = "x-sc-id";
-pub const SPACE_ID_HEADER: &str = "X-Space-ID";
-
-#[derive(Deserialize, Serialize)]
-pub struct EmptyResponse {
-    pub status: u16,
-    pub message: String,
-}
-
 #[derive(Debug)]
 pub struct AppError {
     pub status: u16,
@@ -20,12 +9,15 @@ impl AppError {
     pub async fn from_res(res: reqwest::Response) -> Result<Self, Self> {
         let req_id = res
             .headers()
-            .get(REQ_ID_HEADER)
+            .get(super::api::REQ_ID_HEADER)
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_owned())
             .unwrap_or_default();
 
-        let data = res.json::<EmptyResponse>().await.map_err(Self::err)?;
+        let data = res
+            .json::<super::api::EmptyResponse>()
+            .await
+            .map_err(Self::err)?;
 
         Ok(Self {
             status: data.status,
