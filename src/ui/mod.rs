@@ -1,18 +1,22 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{notification::Notification, ActiveTheme, ContextModal, Icon, IconName, Root};
-use header::Header;
+use header::HeaderUi;
 
 use crate::{
     auth::{Auth, AuthClientEvent, AuthEvent, SessionState},
     err::AppError,
+    ui::login::LoginUi,
 };
 
 mod header;
+mod login;
 
 actions!(window, [CloseWindow]);
 
 pub struct Rooter {
-    header: Entity<Header>,
+    header_ui: Entity<HeaderUi>,
+    login_ui: Entity<LoginUi>,
+
     auth: Entity<Auth>,
     auth_loading: bool,
     session_state: Option<SessionState>,
@@ -21,8 +25,10 @@ pub struct Rooter {
 
 impl Rooter {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let header = Header::view(window, cx);
         let auth = cx.new(|cx| Auth::init(cx));
+
+        let header_ui = HeaderUi::view(window, cx);
+        let login_ui = LoginUi::view(auth.clone(), window, cx);
 
         let win_auth = auth.clone();
         cx.on_window_closed(move |cx| {
@@ -58,9 +64,6 @@ impl Rooter {
                         }
                     },
                 },
-                AuthEvent::Idle => {
-                    this.auth_loading = false;
-                }
                 AuthEvent::Session(state) => {
                     match state {
                         SessionState::Validating => (),
@@ -74,10 +77,9 @@ impl Rooter {
             cx.notify();
         });
 
-        Self::setup_auth(cx);
-
         Self {
-            header,
+            header_ui,
+            login_ui,
             auth,
             auth_loading: false,
             session_state: None,
@@ -86,10 +88,14 @@ impl Rooter {
     }
 
     pub fn view(window: &mut Window, cx: &mut App) -> Entity<Self> {
-        cx.new(|cx| Self::new(window, cx))
+        cx.new(|cx| {
+            let root = Self::new(window, cx);
+            root.setup_auth(cx);
+            root
+        })
     }
 
-    fn setup_auth(cx: &mut Context<Self>) {
+    fn setup_auth(&self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             // get inner client and prepare event
             let inner = this.update(cx, |this, cx| {
@@ -161,10 +167,13 @@ impl Render for Rooter {
         let notification_layer = Root::render_notification_layer(window, cx);
 
         div()
+            .on_action(|_: &CloseWindow, win, _| {
+                win.remove_window();
+            })
             .flex()
             .flex_col()
             .size_full()
-            .child(self.header.clone())
+            .child(self.header_ui.clone())
             .when(self.auth_loading, |d| {
                 d.child(
                     div().size_full().flex().child(
@@ -189,23 +198,11 @@ impl Render for Rooter {
                 )
             })
             .when(!self.auth_loading, |d| {
-                d.child(
-                    div().flex().flex_row().flex_1().child(
-                        div().flex_1().bg(cx.theme().background).p_6().child(
-                            div()
-                                .text_color(cx.theme().accent_foreground)
-                                .text_lg()
-                                .child("Main content area")
-                                .when_some(self.session_state.clone(), |d, state| {
-                                    d.child(match state {
-                                        SessionState::SignedIn => "Signed in",
-                                        SessionState::LoggedOut => "Logged out",
-                                        _ => "...",
-                                    })
-                                }),
-                        ),
-                    ),
-                )
+                d.when_some(self.session_state.clone(), |d, state| match state {
+                    SessionState::SignedIn => d.child("Signed in"),
+                    SessionState::LoggedOut => d.child(self.login_ui.clone()),
+                    SessionState::Validating => d.child("..."),
+                })
             })
             .when(notification_layer.is_some(), |d| {
                 d.child(notification_layer.unwrap())

@@ -1,13 +1,12 @@
 use gpui::*;
 use gpui_component::{ActiveTheme, TitleBar};
-use root::Rooter;
 
 mod assets;
 mod auth;
 mod err;
-mod root;
 mod store;
 mod theme;
+mod ui;
 mod util;
 
 fn get_window_options(cx: &mut App) -> WindowOptions {
@@ -31,6 +30,8 @@ fn main() {
         .run(|cx: &mut App| {
             let window_options = get_window_options(cx);
 
+            cx.bind_keys([KeyBinding::new("cmd-w", ui::CloseWindow, None)]);
+
             let store = store::Store::load();
             cx.set_global(store);
 
@@ -40,7 +41,7 @@ fn main() {
                 gpui_component::theme::init(cx);
                 theme::change_color_mode(cx.theme().mode, cx);
 
-                let root_view = Rooter::view(win, cx);
+                let root_view = ui::Rooter::view(win, cx);
                 cx.new(|cx| gpui_component::Root::new(root_view.into(), win, cx))
             })
             .unwrap();

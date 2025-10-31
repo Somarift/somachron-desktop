@@ -1,18 +1,17 @@
-use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::{
     button::{Button, ButtonVariants as _},
     label::Label,
-    ActiveTheme as _, IconName, Sizable as _, ThemeMode,
+    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt, ThemeMode,
 };
 
 use crate::theme::*;
 
 const TITLE_BAR_LEFT_PADDING: Pixels = px(80.);
 
-pub struct Header {}
+pub struct HeaderUi {}
 
-impl Header {
+impl HeaderUi {
     pub fn new(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
         Self {}
     }
@@ -31,25 +30,19 @@ impl Header {
     }
 }
 
-impl Render for Header {
+impl Render for HeaderUi {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme_toggle = Button::new("theme-mode")
-            .map(|this| {
-                if cx.theme().mode.is_dark() {
-                    this.icon(IconName::Sun)
-                } else {
-                    this.icon(IconName::Moon)
-                }
-            })
+            .icon(Icon::empty().path("icons/circle-shade.svg"))
             .small()
             .ghost()
             .on_click(cx.listener(Self::change_mode));
 
-        let github_button = Button::new("github")
-            .icon(IconName::GitHub)
+        let user_button = Button::new("user")
+            .icon(IconName::CircleUser)
             .small()
             .ghost()
-            .on_click(|_, _, cx| cx.open_url("https://github.com/duanebester/pgui"));
+            .on_click(|_, _, cx| cx.open_url(""));
 
         div()
             .id("header-bar")
@@ -63,7 +56,7 @@ impl Render for Header {
                     .justify_between()
                     .items_center()
                     .p_1()
-                    .child(Label::new("Somachron").text_sm())
+                    .child(Label::new("Somachron").text_xs().font_medium())
                     .child(
                         div()
                             .pr(px(5.0))
@@ -71,7 +64,7 @@ impl Render for Header {
                             .gap_2()
                             .items_center()
                             .child(theme_toggle)
-                            .child(github_button),
+                            .child(user_button),
                     ),
             )
     }
