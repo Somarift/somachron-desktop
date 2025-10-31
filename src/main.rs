@@ -1,6 +1,7 @@
 use gpui::*;
 use gpui_component::{ActiveTheme, TitleBar};
 
+mod api;
 mod assets;
 mod auth;
 mod err;

@@ -2,10 +2,13 @@ use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
     button::{Button, ButtonVariants},
     input::{InputState, OtpInput, OtpState, TextInput},
-    ActiveTheme, Disableable, Icon, StyledExt,
+    ActiveTheme, Disableable, Icon, Sizable, StyledExt,
 };
 
-use crate::auth::{Auth, AuthEvent, SessionState};
+use crate::{
+    api,
+    auth::{Auth, AuthEvent, SessionState},
+};
 
 pub struct LoginUi {
     auth: Entity<Auth>,
@@ -145,6 +148,7 @@ impl LoginUi {
         self.email_input.update(cx, |state, cx| {
             state.focus_handle(cx);
         });
+        self.err_text = None;
     }
 }
 
@@ -228,36 +232,21 @@ impl Render for LoginUi {
                                         }),
                                 )
                                 .when(self.otp_verification, |d| {
-                                    d.child(OtpInput::new(&self.otp_input)).child(
-                                        div()
-                                            .grid()
-                                            .grid_cols(2)
-                                            .gap_4()
-                                            .child(
-                                                Button::new("login-cancel")
-                                                    .disabled(self.loading)
-                                                    .danger()
-                                                    .cursor_pointer()
-                                                    .label("Cancel")
-                                                    .on_click(cx.listener(
-                                                        |this, _, window, cx| {
-                                                            this.reset_otp_verification(
-                                                                Some(window),
-                                                                cx,
-                                                            );
-                                                        },
-                                                    )),
-                                            )
-                                            .child(
-                                                Button::new("login-verify")
-                                                    .disabled(self.loading)
-                                                    .primary()
-                                                    .cursor_pointer()
-                                                    .label("Verify")
-                                                    .on_click(cx.listener(|this, _, _, cx| {
-                                                        this.verify_otp(cx);
-                                                    })),
-                                            ),
+                                    d.child(
+                                        OtpInput::new(&self.otp_input)
+                                            .groups(2)
+                                            .disabled(self.loading)
+                                            .large(),
+                                    )
+                                    .child(
+                                        Button::new("login-cancel")
+                                            .disabled(self.loading)
+                                            .danger()
+                                            .cursor_pointer()
+                                            .label("Cancel")
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.reset_otp_verification(Some(window), cx);
+                                            })),
                                     )
                                 })
                                 .when(!self.otp_verification, |d| {
@@ -277,7 +266,20 @@ impl Render for LoginUi {
                                         .id("go-to-sign-up")
                                         .text_center()
                                         .text_sm()
-                                        .child("Don't have an account? Sign up"),
+                                        .rounded_md()
+                                        .when_else(
+                                            self.loading || self.otp_verification,
+                                            |d| d.text_color(cx.theme().muted_foreground),
+                                            |d| {
+                                                d.cursor_pointer().hover(|s| s.bg(cx.theme().muted))
+                                            },
+                                        )
+                                        .child("Don't have an account? Sign up")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            if !this.loading && !this.otp_verification {
+                                                cx.open_url(api::SIGN_UP_URL);
+                                            }
+                                        })),
                                 ),
                         ),
                 ),
