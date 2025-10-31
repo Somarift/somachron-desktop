@@ -14,7 +14,7 @@ use crate::{
 };
 
 const CLERK_API_URL: &str = "https://clerk.somachron.shank03.com";
-const CLERK_QUERY_VERSION: &str = "?__clerk_api_version=2025-04-10&_clerk_js_version=5.80.0";
+const CLERK_QUERY_VERSION: &str = "?__clerk_api_version=2025-04-10";
 const CLERK_STRATEGY: &str = "email_code";
 
 const SET_COOKIE_HEADER: &str = "Set-Cookie";
@@ -37,7 +37,6 @@ pub enum SessionState {
 
 #[derive(Debug)]
 pub enum AuthEvent {
-    Idle,
     Client(AuthClientEvent),
     Session(SessionState),
 }
@@ -66,6 +65,27 @@ impl Auth {
     }
 }
 
+#[derive(Clone)]
+struct AuthToken {
+    token: String,
+    exp: u64, // secs
+}
+
+impl AuthToken {
+    fn new(token: String) -> Result<Self, AppError> {
+        let payload = match token.split('.').nth(1) {
+            Some(p) => base64::prelude::BASE64_STANDARD_NO_PAD
+                .decode(p)
+                .map_err(AppError::err)?,
+            None => return Err(AppError::message("Invalid token")),
+        };
+
+        let __JwtClaims { exp } = serde_json::from_slice(&payload).map_err(AppError::err)?;
+
+        Ok(Self { token, exp })
+    }
+}
+
 pub struct InnerAuth {
     client: reqwest::Client,
     cookies: RwLock<HashMap<String, Cookie>>,
@@ -74,7 +94,7 @@ pub struct InnerAuth {
     sign_in_id: RwLock<Option<String>>,
     session_id: RwLock<Option<String>>,
 
-    token: RwLock<Option<String>>,
+    token_spec: RwLock<Option<AuthToken>>,
 }
 
 impl InnerAuth {
@@ -102,7 +122,7 @@ impl InnerAuth {
             client_id: RwLock::new(client_id),
             session_id: RwLock::new(session_id),
             sign_in_id: RwLock::new(None),
-            token: RwLock::new(None),
+            token_spec: RwLock::new(None),
         }
     }
 
@@ -288,34 +308,24 @@ impl InnerAuth {
     }
 
     pub async fn get_token(&self) -> Result<(), AppError> {
-        tokio_rt(async move {
-            let gt = self.token.read().unwrap();
-            let token = match &*gt {
-                Some(token) => token.clone(),
-                None => return Err(AppError::message("No token !")),
-            };
-            drop(gt);
+        let gt = self.token_spec.read().unwrap();
+        let spec = match &*gt {
+            Some(spec) => spec.clone(),
+            None => return Err(AppError::message("No token !")),
+        };
+        drop(gt);
 
-            let payload = match token.split('.').nth(1) {
-                Some(p) => base64::prelude::BASE64_STANDARD_NO_PAD
-                    .decode(p)
-                    .map_err(AppError::err)?,
-                None => return Err(AppError::message("Invalid token")),
-            };
+        let current_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .and_then(|v| Ok(v.as_secs()))
+            .unwrap_or(1);
 
-            let __JwtClaims { exp } = serde_json::from_slice(&payload).map_err(AppError::err)?;
-            let current_secs = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .and_then(|v| Ok(v.as_secs()))
-                .unwrap_or(1);
+        if current_secs > spec.exp {
+            // log::info!("Fetching token: current: {}, exp: {}", current_secs, exp);
+            return self.fetch_token().await;
+        }
 
-            if current_secs > exp {
-                // log::info!("Fetching token: current: {}, exp: {}", current_secs, exp);
-                return self.fetch_token().await;
-            }
-
-            Ok(())
-        })
+        Ok(())
     }
 
     pub async fn fetch_token(&self) -> Result<(), AppError> {
@@ -343,8 +353,8 @@ impl InnerAuth {
                 let data: TokenPayload = res.json().await.map_err(AppError::err)?;
 
                 {
-                    let mut gt = self.token.write().unwrap();
-                    *gt = Some(data.jwt);
+                    let mut gt = self.token_spec.write().unwrap();
+                    *gt = Some(AuthToken::new(data.jwt)?);
                 }
                 Ok(())
             } else {
@@ -354,22 +364,59 @@ impl InnerAuth {
         })
     }
 
-    async fn get_error(&self, res: reqwest::Response) -> Result<AppError, AppError> {
+    pub async fn sign_out(&self) -> Result<(), AppError> {
         tokio_rt(async move {
-            let status = res.status();
-            let data: ClerkErrorPayload = res.json().await.map_err(AppError::err)?;
-            Ok(AppError {
-                status: status.as_u16(),
-                message: data
-                    .errors
-                    .into_iter()
-                    .fold(String::from(""), |mut acc, err| {
-                        acc.push_str(&err.long_message);
-                        acc.push_str("; ");
-                        acc
-                    }),
-                req_id: "".into(),
-            })
+            let res = self
+                .client
+                .post(format!(
+                    "{CLERK_API_URL}/v1/client/sessions{CLERK_QUERY_VERSION}&_method=DELETE"
+                ))
+                .header(COOKIE_HEADER, self.get_header_cookies())
+                .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
+                .send()
+                .await
+                .map_err(AppError::err)?;
+
+            let cookies = extract_cookies(res.headers());
+            if res.status().is_client_error() {
+                let text = res.text().await.map_err(AppError::err)?;
+                return Err(AppError::message(format!(
+                    "Error deleting session: {}",
+                    text
+                )));
+            }
+
+            let _: ClientPayload = res.json().await.unwrap();
+
+            {
+                let mut wl = self.token_spec.write().unwrap();
+                *wl = None;
+
+                let mut wl = self.cookies.write().unwrap();
+                *wl = cookies;
+
+                let mut wl = self.session_id.write().unwrap();
+                *wl = None;
+            }
+
+            Ok(())
+        })
+    }
+
+    async fn get_error(&self, res: reqwest::Response) -> Result<AppError, AppError> {
+        let status = res.status();
+        let data: ClerkErrorPayload = res.json().await.map_err(AppError::err)?;
+        Ok(AppError {
+            status: status.as_u16(),
+            message: data
+                .errors
+                .into_iter()
+                .fold(String::from(""), |mut acc, err| {
+                    acc.push_str(&err.long_message);
+                    acc.push_str("; ");
+                    acc
+                }),
+            req_id: "".into(),
         })
     }
 
