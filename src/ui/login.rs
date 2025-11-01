@@ -1,8 +1,8 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
+    ActiveTheme, Disableable, Icon, Sizable, StyledExt,
     button::{Button, ButtonVariants},
     input::{InputState, OtpInput, OtpState, TextInput},
-    ActiveTheme, Disableable, Icon, Sizable, StyledExt,
 };
 
 use crate::{
@@ -50,8 +50,9 @@ impl LoginUi {
     fn sign_in(&self, cx: &mut Context<Self>) {
         let email = self.email_input.read(cx).value();
         cx.spawn(async move |this, cx| {
-            let _ = this.update(cx, |this, _| {
+            let _ = this.update(cx, |this, cx| {
                 this.loading = true;
+                cx.notify();
             });
 
             let inner = this
@@ -71,9 +72,10 @@ impl LoginUi {
                         .await
                 }
                 Err(err) => {
-                    this.update(cx, |this, _| {
+                    this.update(cx, |this, cx| {
                         this.loading = false;
                         this.err_text = Some(err.message);
+                        cx.notify();
                     })
                     .unwrap();
                     return;
@@ -93,6 +95,7 @@ impl LoginUi {
                         this.err_text = Some(format!("Failed to login: {err:?}"));
                     }
                 };
+                cx.notify();
             });
         })
         .detach();
@@ -131,6 +134,7 @@ impl LoginUi {
                         this.err_text = Some(err.message);
                     }
                 };
+                cx.notify();
             })
             .unwrap();
         })
@@ -143,10 +147,12 @@ impl LoginUi {
             if let Some(window) = window {
                 otp.set_value("", window, cx);
             }
+            cx.notify();
         });
         self.otp_verification = false;
         self.email_input.update(cx, |state, cx| {
             state.focus_handle(cx);
+            cx.notify();
         });
         self.err_text = None;
     }
