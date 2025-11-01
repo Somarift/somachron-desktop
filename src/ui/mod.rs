@@ -1,5 +1,5 @@
 use gpui::{prelude::FluentBuilder, *};
-use gpui_component::{notification::Notification, ActiveTheme, ContextModal, Icon, IconName, Root};
+use gpui_component::{ActiveTheme, ContextModal, Icon, IconName, Root, notification::Notification};
 use header::HeaderUi;
 
 use crate::{
@@ -90,13 +90,13 @@ impl Rooter {
     pub fn view(window: &mut Window, cx: &mut App) -> Entity<Self> {
         cx.new(|cx| {
             let root = Self::new(window, cx);
-            root.setup_auth(cx);
+            root.setup_auth(window, cx);
             root
         })
     }
 
-    fn setup_auth(&self, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
+    fn setup_auth(&self, window: &mut Window, cx: &mut Context<Self>) {
+        cx.spawn_in(window, async move |this, cx| {
             // get inner client and prepare event
             let inner = this.update(cx, |this, cx| {
                 this.auth.update(cx, |auth, cx| {
@@ -147,11 +147,21 @@ impl Rooter {
                     .spawn(async move { _inner.fetch_token().await })
                     .await;
 
-                this.update(cx, |this, cx| {
+                this.update_in(cx, |this, window, cx| {
                     this.auth.update(cx, |_, cx| {
                         match result {
                             Ok(_) => cx.emit(AuthEvent::Session(SessionState::SignedIn)),
-                            Err(_) => cx.emit(AuthEvent::Session(SessionState::LoggedOut)),
+                            Err(err) => {
+                                if inner.has_session() {
+                                    window.push_notification(
+                                        Notification::error(err.message).autohide(true),
+                                        cx,
+                                    );
+                                    cx.emit(AuthEvent::Session(SessionState::SignedIn));
+                                } else {
+                                    cx.emit(AuthEvent::Session(SessionState::LoggedOut));
+                                }
+                            }
                         };
                     });
                 })

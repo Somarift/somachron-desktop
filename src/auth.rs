@@ -126,6 +126,10 @@ impl InnerAuth {
         }
     }
 
+    pub fn has_session(&self) -> bool {
+        self.session_id.read().unwrap().is_some()
+    }
+
     pub async fn setup_client(&self) -> Result<(), AppError> {
         tokio_rt(async move {
             {
@@ -307,13 +311,14 @@ impl InnerAuth {
         })
     }
 
-    pub async fn get_token(&self) -> Result<(), AppError> {
-        let gt = self.token_spec.read().unwrap();
-        let spec = match &*gt {
-            Some(spec) => spec.clone(),
-            None => return Err(AppError::message("No token !")),
+    pub async fn get_token(&self) -> Result<String, AppError> {
+        let spec = {
+            let gt = self.token_spec.read().unwrap();
+            match &*gt {
+                Some(spec) => spec.clone(),
+                None => return Err(AppError::message("No token !")),
+            }
         };
-        drop(gt);
 
         let current_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -321,11 +326,22 @@ impl InnerAuth {
             .unwrap_or(1);
 
         if current_secs > spec.exp {
-            // log::info!("Fetching token: current: {}, exp: {}", current_secs, exp);
-            return self.fetch_token().await;
+            println!(
+                "Fetching token: current: {}, exp: {}",
+                current_secs, spec.exp
+            );
+            self.fetch_token().await?;
         }
 
-        Ok(())
+        let spec = {
+            let gt = self.token_spec.read().unwrap();
+            match &*gt {
+                Some(spec) => spec.clone(),
+                None => return Err(AppError::message("No token !")),
+            }
+        };
+
+        Ok(spec.token)
     }
 
     pub async fn fetch_token(&self) -> Result<(), AppError> {

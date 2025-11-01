@@ -2,6 +2,10 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{err::AppError, util::tokio_rt};
 
+pub mod auth;
+pub mod models;
+pub mod user;
+
 pub const SIGN_UP_URL: &str = "https://somachron.shank03.com/auth/sign-up";
 
 const API_URL: &str = "https://api-somachron.shank03.com/v1";

@@ -1,20 +1,23 @@
 [package]
 name = "somachron-desktop"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-gpui = { version = "*" }
-gpui-component = { version = "*" }
+gpui = { version = "0.2.2" }
+gpui-component = { version = "0.3.1" }
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 
 anyhow = "1"
 serde = "1"
 serde_json = "1"
 base64 = "0.22.1"
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3.31"
+bytes = "1.10.1"
 
 dirs = "6.0.0"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart", "rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
 
 # smallvec is included here for convenience, it is used by gpui when creating
