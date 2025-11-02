@@ -24,6 +24,7 @@ fn get_window_options(cx: &mut App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: Some(TitleBar::title_bar_options()),
+        window_min_size: Some(size(px(800.0), px(600.0))),
         ..Default::default()
     }
 }
