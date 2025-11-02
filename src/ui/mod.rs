@@ -5,10 +5,11 @@ use header::HeaderUi;
 use crate::{
     auth::{Auth, AuthClientEvent, AuthEvent, SessionState},
     err::AppError,
-    ui::login::LoginUi,
+    ui::{home::HomeUi, login::LoginUi},
 };
 
 mod header;
+mod home;
 mod login;
 
 actions!(window, [CloseWindow]);
@@ -16,6 +17,7 @@ actions!(window, [CloseWindow]);
 pub struct Rooter {
     header_ui: Entity<HeaderUi>,
     login_ui: Entity<LoginUi>,
+    home_ui: Entity<HomeUi>,
 
     auth: Entity<Auth>,
     auth_loading: bool,
@@ -27,8 +29,9 @@ impl Rooter {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let auth = cx.new(|cx| Auth::init(cx));
 
-        let header_ui = HeaderUi::view(auth.clone(), window, cx);
+        let header_ui = HeaderUi::view(cx);
         let login_ui = LoginUi::view(auth.clone(), window, cx);
+        let home_ui = HomeUi::view(auth.clone(), window, cx);
 
         let win_auth = auth.clone();
         cx.on_window_closed(move |cx| {
@@ -80,6 +83,7 @@ impl Rooter {
         Self {
             header_ui,
             login_ui,
+            home_ui,
             auth,
             auth_loading: false,
             session_state: None,
@@ -195,7 +199,7 @@ impl Render for Rooter {
                             .bg(cx.theme().background)
                             .p_6()
                             .gap_x_4()
-                            .child(Icon::new(IconName::LoaderCircle).size_12().with_animation(
+                            .child(Icon::new(IconName::LoaderCircle).size_8().with_animation(
                                 ElementId::CodeLocation(*std::panic::Location::caller()),
                                 Animation::new(std::time::Duration::from_secs(2)).repeat(),
                                 |el, delta| el.transform(Transformation::rotate(percentage(delta))),
@@ -209,9 +213,28 @@ impl Render for Rooter {
             })
             .when(!self.auth_loading, |d| {
                 d.when_some(self.session_state.clone(), |d, state| match state {
-                    SessionState::SignedIn => d.child("Signed in"),
+                    SessionState::SignedIn => d.child(self.home_ui.clone()),
                     SessionState::LoggedOut => d.child(self.login_ui.clone()),
-                    SessionState::Validating => d.child("..."),
+                    SessionState::Validating => d.child(
+                        div().size_full().flex().child(
+                            div()
+                                .flex()
+                                .w_full()
+                                .justify_center()
+                                .items_center()
+                                .bg(cx.theme().background)
+                                .p_6()
+                                .gap_x_4()
+                                .child(Icon::new(IconName::LoaderCircle).size_8().with_animation(
+                                    ElementId::CodeLocation(*std::panic::Location::caller()),
+                                    Animation::new(std::time::Duration::from_secs(2)).repeat(),
+                                    |el, delta| {
+                                        el.transform(Transformation::rotate(percentage(delta)))
+                                    },
+                                ))
+                                .child("Syncing session"),
+                        ),
+                    ),
                 })
             })
             .when(notification_layer.is_some(), |d| {
