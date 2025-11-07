@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::{err::AppError, web::tokio_rt};
 
 pub mod auth;
+pub mod cloud;
 pub mod models;
 pub mod space;
 pub mod user;
