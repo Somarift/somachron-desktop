@@ -7,6 +7,7 @@ use gpui_component::{
 
 use crate::{
     auth::{Auth, AuthEvent, SessionState},
+    util::MapAsync,
     web::api,
 };
 
@@ -50,39 +51,27 @@ impl LoginUi {
     fn sign_in(&self, cx: &mut Context<Self>) {
         let email = self.email_input.read(cx).value();
         cx.spawn(async move |this, cx| {
-            let _ = this.update(cx, |this, cx| {
-                this.loading = true;
-                cx.notify();
-            });
-
             let inner = this
-                .read_with(cx, |this, cx| this.auth.read(cx).inner())
+                .update(cx, |this, cx| {
+                    this.loading = true;
+                    cx.notify();
+
+                    this.auth.read(cx).inner()
+                })
                 .unwrap();
 
-            let _inner = inner.clone();
             let result = cx
                 .background_executor()
-                .spawn(async move { inner.sign_in(&email).await })
+                .spawn(async move {
+                    inner
+                        .sign_in(&email)
+                        .await
+                        .map_async(async move |idn| inner.prepare_first_factor(&idn).await)
+                        .await
+                })
                 .await;
 
-            let result = match result {
-                Ok(email_idn) => {
-                    cx.background_executor()
-                        .spawn(async move { _inner.prepare_first_factor(&email_idn).await })
-                        .await
-                }
-                Err(err) => {
-                    this.update(cx, |this, cx| {
-                        this.loading = false;
-                        this.err_text = Some(err.message);
-                        cx.notify();
-                    })
-                    .unwrap();
-                    return;
-                }
-            };
-
-            let _ = this.update(cx, |this, cx| {
+            this.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
                     Ok(_) => {
@@ -96,7 +85,8 @@ impl LoginUi {
                     }
                 };
                 cx.notify();
-            });
+            })
+            .unwrap();
         })
         .detach();
     }

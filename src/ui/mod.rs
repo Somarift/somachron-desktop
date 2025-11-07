@@ -4,7 +4,6 @@ use header::HeaderUi;
 
 use crate::{
     auth::{Auth, AuthClientEvent, AuthEvent, SessionState},
-    err::AppError,
     ui::{home::HomeUi, login::LoginUi},
 };
 
@@ -102,40 +101,26 @@ impl Rooter {
     fn setup_auth(&self, window: &mut Window, cx: &mut Context<Self>) {
         cx.spawn_in(window, async move |this, cx| {
             // get inner client and prepare event
-            let inner = this.update(cx, |this, cx| {
-                this.auth.update(cx, |auth, cx| {
-                    cx.emit(AuthEvent::Client(AuthClientEvent::Loading));
-                    auth.inner()
-                })
-            });
-
-            let inner = match inner {
-                Ok(inner) => inner,
-                Err(err) => {
-                    this.update(cx, |this, cx| {
-                        this.auth.update(cx, |_, cx| {
-                            cx.emit(AuthEvent::Client(AuthClientEvent::Setup(Err(
-                                AppError::gp_err(err),
-                            ))));
-                        });
+            let inner = this
+                .update(cx, |this, cx| {
+                    this.auth.update(cx, |auth, cx| {
+                        cx.emit(AuthEvent::Client(AuthClientEvent::Loading));
+                        auth.inner()
                     })
-                    .unwrap();
-                    return;
-                }
-            };
+                })
+                .unwrap();
 
-            // setup
             let _inner = inner.clone();
-            let result = cx
+            let client_result = cx
                 .background_executor()
                 .spawn(async move { _inner.setup_client().await })
                 .await;
 
             // send event
-            let is_ok = result.is_ok();
+            let is_ok = client_result.is_ok();
             this.update(cx, |this, cx| {
                 this.auth.update(cx, |_, cx| {
-                    cx.emit(AuthEvent::Client(AuthClientEvent::Setup(result)));
+                    cx.emit(AuthEvent::Client(AuthClientEvent::Setup(client_result)));
 
                     if is_ok {
                         cx.emit(AuthEvent::Session(SessionState::Validating));

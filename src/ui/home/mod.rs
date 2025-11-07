@@ -9,6 +9,7 @@ use gpui_component::{
 
 use crate::{
     auth::Auth,
+    util::MapAsync,
     web::api::{
         self,
         models::{space::res::UserSpaceResponse, user::res::UserResponse},
@@ -63,25 +64,20 @@ impl HomeUi {
                     this.loading_sidebar = true;
                     cx.notify();
 
-                    this.auth.read_with(cx, |auth, _| auth.inner())
+                    this.auth.read(cx).inner()
                 })
                 .unwrap();
 
-            let _inner = inner.clone();
-            let token = cx
+            let user_spaces = cx
                 .background_executor()
-                .spawn(async move { _inner.get_token().await })
-                .await;
-
-            let _inner = inner.clone();
-            let user_spaces = match token {
-                Ok(token) => {
-                    cx.background_executor()
-                        .spawn(async move { api::space::get_user_spaces(token).await })
+                .spawn(async move {
+                    inner
+                        .get_token()
                         .await
-                }
-                Err(err) => Err(err),
-            };
+                        .map_async(async move |token| api::space::get_user_spaces(token).await)
+                        .await
+                })
+                .await;
 
             this.update_in(cx, |this, window, cx| {
                 this.loading_sidebar = false;
@@ -112,19 +108,16 @@ impl HomeUi {
                 })
                 .unwrap();
 
-            let result = cx
+            let user = cx
                 .background_executor()
-                .spawn(async move { inner.get_token().await })
-                .await;
-
-            let user = match result {
-                Ok(token) => {
-                    cx.background_executor()
-                        .spawn(async move { api::user::get_user(&token).await })
+                .spawn(async move {
+                    inner
+                        .get_token()
                         .await
-                }
-                Err(err) => Err(err),
-            };
+                        .map_async(async move |token| api::user::get_user(&token).await)
+                        .await
+                })
+                .await;
 
             this.update_in(cx, |this, window, cx| {
                 this.loading_user = false;
