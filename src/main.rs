@@ -3,7 +3,6 @@ use std::sync::Arc;
 use gpui::*;
 use gpui_component::{ActiveTheme, TitleBar};
 
-mod api;
 mod assets;
 mod auth;
 mod err;
@@ -11,7 +10,7 @@ mod store;
 mod theme;
 mod ui;
 mod util;
-mod web_client;
+mod web;
 
 fn get_window_options(cx: &mut App) -> WindowOptions {
     let mut window_size = size(px(1600.0), px(1200.0));
@@ -32,7 +31,7 @@ fn get_window_options(cx: &mut App) -> WindowOptions {
 fn main() {
     Application::new()
         .with_assets(assets::Assets)
-        .with_http_client(Arc::new(web_client::WebClient::new()))
+        .with_http_client(Arc::new(web::WebClient::new()))
         .run(|cx: &mut App| {
             let window_options = get_window_options(cx);
 

@@ -6,8 +6,8 @@ use gpui_component::{
 };
 
 use crate::{
-    api,
     auth::{Auth, AuthEvent, SessionState},
+    web::api,
 };
 
 pub struct LoginUi {

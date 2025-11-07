@@ -6,8 +6,6 @@ use futures::{FutureExt, TryStreamExt};
 use gpui::http_client::http;
 use reqwest::header::HeaderValue;
 
-static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-
 pub struct WebClient {
     client: reqwest::Client,
     user_agent: HeaderValue,
@@ -30,16 +28,7 @@ impl WebClient {
             .build()
             .expect("reqwest bruh");
 
-        let rt = tokio::runtime::Handle::try_current().unwrap_or_else(|_| {
-            let rt = RUNTIME.get_or_init(|| {
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .expect("tokio bruh")
-            });
-            rt.handle().clone()
-        });
-
+        let rt = super::get_tokio_rt();
         Self {
             client,
             user_agent,

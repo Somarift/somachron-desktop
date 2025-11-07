@@ -10,7 +10,6 @@ use serde::Deserialize;
 use crate::{
     err::AppError,
     store::{Cookie, Store},
-    util::tokio_rt,
 };
 
 const CLERK_API_URL: &str = "https://clerk.somachron.shank03.com";
@@ -88,6 +87,7 @@ impl AuthToken {
 
 pub struct InnerAuth {
     client: reqwest::Client,
+    rt: tokio::runtime::Handle,
     cookies: RwLock<HashMap<String, Cookie>>,
 
     client_id: RwLock<Option<String>>,
@@ -110,6 +110,8 @@ impl InnerAuth {
             .build()
             .unwrap();
 
+        let rt = super::web::get_tokio_rt();
+
         let store = Store::global_get(cx);
         let cookies = store.cookies.clone();
         let cookies = filter_store_cookies(cookies);
@@ -118,6 +120,7 @@ impl InnerAuth {
 
         Self {
             client,
+            rt,
             cookies: RwLock::new(cookies),
             client_id: RwLock::new(client_id),
             session_id: RwLock::new(session_id),
@@ -131,7 +134,7 @@ impl InnerAuth {
     }
 
     pub async fn setup_client(&self) -> Result<(), AppError> {
-        tokio_rt(async move {
+        self.rt.block_on(async move {
             {
                 let rl = self.client_id.read().unwrap();
                 if let Some(_) = &*rl {
@@ -188,7 +191,7 @@ impl InnerAuth {
     }
 
     pub async fn sign_in(&self, email: &str) -> Result<String, AppError> {
-        tokio_rt(async move {
+        self.rt.block_on(async move {
             let res = self
                 .client
                 .post(format!(
@@ -230,7 +233,7 @@ impl InnerAuth {
     }
 
     pub async fn prepare_first_factor(&self, email_address_id: &str) -> Result<(), AppError> {
-        tokio_rt(async move {
+        self.rt.block_on(async move {
             let g_sia = self.sign_in_id.read().unwrap();
             let sia = match &*g_sia {
                 Some(s) => s.clone(),
@@ -267,7 +270,7 @@ impl InnerAuth {
     }
 
     pub async fn attempt_first_factor(&self, code: &str) -> Result<(), AppError> {
-        tokio_rt(async move {
+        self.rt.block_on(async move {
             let g_sia = self.sign_in_id.read().unwrap();
             let sia = match &*g_sia {
                 Some(s) => s.clone(),
@@ -345,7 +348,7 @@ impl InnerAuth {
     }
 
     pub async fn fetch_token(&self) -> Result<(), AppError> {
-        tokio_rt(async move {
+        self.rt.block_on(async move {
             let rl = self.session_id.read().unwrap();
             let sid = match &*rl {
                 Some(sid) => sid.clone(),
@@ -381,7 +384,7 @@ impl InnerAuth {
     }
 
     pub async fn sign_out(&self) -> Result<(), AppError> {
-        tokio_rt(async move {
+        self.rt.block_on(async move {
             let res = self
                 .client
                 .post(format!(

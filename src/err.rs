@@ -9,13 +9,13 @@ impl AppError {
     pub async fn from_res(res: reqwest::Response) -> Result<Self, Self> {
         let req_id = res
             .headers()
-            .get(super::api::REQ_ID_HEADER)
+            .get(super::web::api::REQ_ID_HEADER)
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_owned())
             .unwrap_or_default();
 
         let data = res
-            .json::<super::api::EmptyResponse>()
+            .json::<super::web::api::EmptyResponse>()
             .await
             .map_err(Self::err)?;
 

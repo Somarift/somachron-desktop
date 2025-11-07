@@ -1,9 +1,12 @@
-use std::future::Future;
+pub trait MapAsync<T, E> {
+    async fn map_async<U>(self, f: impl AsyncFnOnce(T) -> Result<U, E> + 'static) -> Result<U, E>;
+}
 
-pub fn tokio_rt<Fut, R, E>(f: Fut) -> Result<R, E>
-where
-    Fut: Future<Output = Result<R, E>>,
-{
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(f)
+impl<T, E> MapAsync<T, E> for Result<T, E> {
+    async fn map_async<U>(self, f: impl AsyncFnOnce(T) -> Result<U, E> + 'static) -> Result<U, E> {
+        match self {
+            Ok(ok) => f(ok).await,
+            Err(err) => Err(err),
+        }
+    }
 }

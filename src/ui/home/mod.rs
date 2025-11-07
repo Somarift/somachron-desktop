@@ -8,11 +8,11 @@ use gpui_component::{
 };
 
 use crate::{
-    api::{
+    auth::Auth,
+    web::api::{
         self,
         models::{space::res::UserSpaceResponse, user::res::UserResponse},
     },
-    auth::Auth,
 };
 
 actions!(user, [MyAction, SignOut]);
