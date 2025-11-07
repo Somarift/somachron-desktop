@@ -1,6 +1,6 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, ContextModal, Icon, IconName, Side,
+    ActiveTheme, Icon, IconName, Side, WindowExt,
     avatar::Avatar,
     h_flex,
     notification::Notification,

@@ -2,7 +2,7 @@ use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
     ActiveTheme, Disableable, Icon, Sizable, StyledExt,
     button::{Button, ButtonVariants},
-    input::{InputState, OtpInput, OtpState, TextInput},
+    input::{Input, InputState, OtpInput, OtpState},
 };
 
 use crate::{
@@ -222,9 +222,9 @@ impl Render for LoginUi {
                                         .gap_2()
                                         .child(div().text_sm().font_medium().child("Email"))
                                         .child(
-                                            TextInput::new(&self.email_input)
+                                            Input::new(&self.email_input)
                                                 .text_sm()
-                                                .cleanable()
+                                                .cleanable(true)
                                                 .disabled(self.otp_verification)
                                                 .line_clamp(1),
                                         )
