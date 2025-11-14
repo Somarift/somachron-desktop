@@ -2,7 +2,7 @@ use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
     ActiveTheme, Disableable, Icon, Sizable, StyledExt,
     button::{Button, ButtonVariants},
-    input::{Input, InputState, OtpInput, OtpState},
+    input::{InputState, OtpInput, OtpState, TextInput},
 };
 
 use crate::{
@@ -66,7 +66,11 @@ impl LoginUi {
                     inner
                         .sign_in(&email)
                         .await
-                        .map_async(async move |idn| inner.prepare_first_factor(&idn).await)
+                        .map_async(async move |idn| {
+                            inner.prepare_first_factor(&idn).await.map(|_| inner)
+                        })
+                        .await
+                        .map_async(async move |inner| inner.fetch_token().await)
                         .await
                 })
                 .await;
@@ -212,9 +216,9 @@ impl Render for LoginUi {
                                         .gap_2()
                                         .child(div().text_sm().font_medium().child("Email"))
                                         .child(
-                                            Input::new(&self.email_input)
+                                            TextInput::new(&self.email_input)
                                                 .text_sm()
-                                                .cleanable(true)
+                                                .cleanable()
                                                 .disabled(self.otp_verification)
                                                 .line_clamp(1),
                                         )

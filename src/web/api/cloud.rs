@@ -1,4 +1,7 @@
-use super::{AppError, models::cloud::res::FolderResponse};
+use super::{
+    AppError,
+    models::cloud::res::{FileMetaReponse, FolderResponse},
+};
 
 pub async fn list_folders(
     token: &str,
@@ -12,6 +15,6 @@ pub async fn list_files(
     token: &str,
     space_id: &str,
     folder_id: &str,
-) -> Result<Vec<FolderResponse>, AppError> {
+) -> Result<Vec<FileMetaReponse>, AppError> {
     super::get(format!("/media/ls/{folder_id}"), token, Some(space_id)).await
 }

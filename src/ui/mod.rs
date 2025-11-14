@@ -1,5 +1,5 @@
 use gpui::{prelude::FluentBuilder, *};
-use gpui_component::{ActiveTheme, Icon, IconName, Root, WindowExt, notification::Notification};
+use gpui_component::{ActiveTheme, ContextModal, Root, notification::Notification};
 use header::HeaderUi;
 
 use crate::{
@@ -7,6 +7,7 @@ use crate::{
     ui::{home::HomeUi, login::LoginUi},
 };
 
+mod _components;
 mod header;
 mod home;
 mod login;
@@ -184,11 +185,7 @@ impl Render for Rooter {
                             .bg(cx.theme().background)
                             .p_6()
                             .gap_x_4()
-                            .child(Icon::new(IconName::LoaderCircle).size_8().with_animation(
-                                ElementId::CodeLocation(*std::panic::Location::caller()),
-                                Animation::new(std::time::Duration::from_secs(2)).repeat(),
-                                |el, delta| el.transform(Transformation::rotate(percentage(delta))),
-                            ))
+                            .child(_components::loading_icon(|icon| icon.size_8()))
                             .when_none(&self.session_state, |d| d.child("Loading auth"))
                             .when_some(self.session_state.clone(), |d, _| {
                                 d.child("Validating session")
@@ -210,13 +207,7 @@ impl Render for Rooter {
                                 .bg(cx.theme().background)
                                 .p_6()
                                 .gap_x_4()
-                                .child(Icon::new(IconName::LoaderCircle).size_8().with_animation(
-                                    ElementId::CodeLocation(*std::panic::Location::caller()),
-                                    Animation::new(std::time::Duration::from_secs(2)).repeat(),
-                                    |el, delta| {
-                                        el.transform(Transformation::rotate(percentage(delta)))
-                                    },
-                                ))
+                                .child(_components::loading_icon(|icon| icon.size_8()))
                                 .child("Syncing session"),
                         ),
                     ),

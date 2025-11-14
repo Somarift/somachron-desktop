@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 gpui = { version = "0.2.2" }
-gpui-component = { version = "0.4.0-preview1" }
+gpui-component = { version = "0.3.1" }
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 
 anyhow = "1"

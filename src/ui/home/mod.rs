@@ -1,6 +1,6 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Side, WindowExt,
+    ActiveTheme, ContextModal, Icon, IconName, Side,
     avatar::Avatar,
     h_flex,
     notification::Notification,
@@ -9,6 +9,10 @@ use gpui_component::{
 
 use crate::{
     auth::Auth,
+    ui::{
+        _components::{self, NavStack, NavState},
+        home::browse::BrowseUi,
+    },
     util::MapAsync,
     web::api::{
         self,
@@ -16,10 +20,16 @@ use crate::{
     },
 };
 
+mod browse;
+mod file_list;
+
 actions!(user, [MyAction, SignOut]);
 
 pub struct HomeUi {
     auth: Entity<Auth>,
+    nav_stack: Entity<NavStack>,
+
+    browse_ui: Entity<BrowseUi>,
 
     user_spaces: Vec<UserSpaceResponse>,
     user: Option<UserResponse>,
@@ -30,6 +40,8 @@ pub struct HomeUi {
 
 impl HomeUi {
     fn new(auth: Entity<Auth>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let nav_stack = cx.new(|_cx| NavStack::new());
+
         let auth_sub = cx.subscribe_in(&auth, window, |this, _, event, window, cx| {
             match event {
                 crate::auth::AuthEvent::Session(session_state) => match session_state {
@@ -43,8 +55,12 @@ impl HomeUi {
             };
         });
 
+        let browse_ui = BrowseUi::view(auth.clone(), nav_stack.clone(), window, cx);
+
         Self {
             auth,
+            nav_stack,
+            browse_ui,
             user_spaces: Vec::new(),
             user: None,
             loading_sidebar: false,
@@ -153,110 +169,85 @@ impl Render for HomeUi {
                     .border_color(cx.theme().border)
                     .rounded_br_xl()
                     .rounded_tr_xl()
-                    .child(
-                        Sidebar::new(Side::Left)
-                            .border_width(0.)
-                            .header(SidebarHeader::new().when_else(
-                                self.loading_user,
-                                |el| {
-                                    el.child(
-                                        h_flex()
-                                            .gap_2()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(
-                                                Icon::new(IconName::LoaderCircle)
-                                                    .size_6()
-                                                    .with_animation(
-                                                        ElementId::CodeLocation(
-                                                            *std::panic::Location::caller(),
-                                                        ),
-                                                        Animation::new(
-                                                            std::time::Duration::from_secs(2),
-                                                        )
-                                                        .repeat(),
-                                                        |el, delta| {
-                                                            el.transform(Transformation::rotate(
-                                                                percentage(delta),
-                                                            ))
-                                                        },
-                                                    ),
-                                            )
-                                            .child("Loading"),
-                                    )
-                                },
-                                |el| {
-                                    el.when_none(&self.user, |el| {
-                                        el.child(h_flex().gap_2().child("No user :/"))
-                                    })
-                                    .when_some(
-                                        self.user.clone(),
-                                        |el, user| {
-                                            el.child(
-                                                h_flex()
-                                                    .w_full()
-                                                    .justify_between()
-                                                    .child(
-                                                        h_flex()
-                                                            .gap_2()
-                                                            .child(
-                                                                Avatar::new()
-                                                                    .name(&user.given_name)
-                                                                    .src(user.picture_url)
-                                                                    .size_8(),
-                                                            )
-                                                            .child(user.given_name),
-                                                    )
-                                                    .child(
-                                                        Icon::new(IconName::ChevronsUpDown)
-                                                            .size_4(),
-                                                    ),
-                                            )
-                                        },
-                                    )
-                                },
-                            ))
-                            .child(SidebarGroup::new("Spaces").child(
-                                SidebarMenu::new().when_else(
-                                    self.loading_sidebar,
-                                    |el| {
-                                        el.child(
-                                            SidebarMenuItem::new("Loading").active(false).suffix(
-                                                Icon::new(IconName::LoaderCircle)
-                                                    .size_4()
-                                                    .with_animation(
-                                                        ElementId::CodeLocation(
-                                                            *std::panic::Location::caller(),
-                                                        ),
-                                                        Animation::new(
-                                                            std::time::Duration::from_secs(2),
-                                                        )
-                                                        .repeat(),
-                                                        |el, delta| {
-                                                            el.transform(Transformation::rotate(
-                                                                percentage(delta),
-                                                            ))
-                                                        },
-                                                    ),
-                                            ),
-                                        )
-                                    },
-                                    |el| {
-                                        el.when_else(
-                                            self.user_spaces.is_empty(),
-                                            |el| el.child(SidebarMenuItem::new("No spaces")),
-                                            |el| {
-                                                el.children(self.user_spaces.iter().map(|us| {
-                                                    SidebarMenuItem::new(&us.space.name).icon(
-                                                        Icon::new(IconName::GalleryVerticalEnd),
-                                                    )
-                                                }))
-                                            },
-                                        )
-                                    },
-                                ),
-                            )),
-                    ),
+                    .child(self.render_sidebar(cx)),
             )
-            .child(div().size_full().child("Main content"))
+            .child(div().size_full().child(self.browse_ui.clone()))
+    }
+}
+
+impl HomeUi {
+    fn render_sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        Sidebar::new(Side::Left)
+            .border_width(0.)
+            .header(SidebarHeader::new().when_else(
+                self.loading_user,
+                |el| {
+                    el.child(
+                        h_flex()
+                            .gap_2()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(_components::loading_icon(|icon| icon.size_6()))
+                            .child("Loading"),
+                    )
+                },
+                |el| {
+                    el.when_none(&self.user, |el| {
+                        el.child(h_flex().gap_2().child("No user :/"))
+                    })
+                    .when_some(self.user.clone(), |el, user| {
+                        el.child(
+                            h_flex()
+                                .w_full()
+                                .justify_between()
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .child(
+                                            Avatar::new()
+                                                .name(&user.given_name)
+                                                .src(user.picture_url)
+                                                .size_8(),
+                                        )
+                                        .child(user.given_name),
+                                )
+                                .child(Icon::new(IconName::ChevronsUpDown).size_4()),
+                        )
+                    })
+                },
+            ))
+            .child(
+                SidebarGroup::new("Spaces").child(SidebarMenu::new().when_else(
+                    self.loading_sidebar,
+                    |el| {
+                        el.child(
+                            SidebarMenuItem::new("Loading")
+                                .active(false)
+                                .suffix(_components::loading_icon(|icon| icon.size_4())),
+                        )
+                    },
+                    |el| {
+                        el.when_else(
+                            self.user_spaces.is_empty(),
+                            |el| el.child(SidebarMenuItem::new("No spaces")),
+                            |el| {
+                                el.children(self.user_spaces.iter().cloned().map(|us| {
+                                    SidebarMenuItem::new(&us.space.name)
+                                        .icon(Icon::new(IconName::GalleryVerticalEnd))
+                                        .on_click(cx.listener(move |this, _ev, _window, cx| {
+                                            this.nav_stack.update(cx, |_stack, cx| {
+                                                cx.emit(_components::NavEvent::Reset(
+                                                    NavState::new(
+                                                        us.space.id.clone(),
+                                                        us.folder.clone(),
+                                                    ),
+                                                ));
+                                            })
+                                        }))
+                                }))
+                            },
+                        )
+                    },
+                )),
+            )
     }
 }

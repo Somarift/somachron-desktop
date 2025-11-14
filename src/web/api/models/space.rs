@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum SpaceRole {
     Owner,
@@ -13,7 +13,7 @@ pub mod res {
     use chrono::{DateTime, Utc};
     use serde::Deserialize;
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Clone)]
     pub struct SpaceResponse {
         pub id: String,
         pub created_at: DateTime<Utc>,
@@ -24,7 +24,7 @@ pub mod res {
         pub picture_url: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Clone)]
     pub struct UserSpaceResponse {
         pub id: String,
         pub created_at: DateTime<Utc>,
