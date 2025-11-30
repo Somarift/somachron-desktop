@@ -27,5 +27,12 @@ pub mod res {
         pub file_name: String,
         pub media_type: super::MediaType,
         pub user: Option<String>,
+        pub width: i32,
+    }
+
+    #[derive(Debug, Deserialize, Clone)]
+    pub struct StreamedUrlsResponse {
+        pub original_stream: String,
+        pub thumbnail_stream: String,
     }
 }

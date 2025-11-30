@@ -47,7 +47,7 @@ fn main() {
                 theme::change_color_mode(cx.theme().mode, cx);
 
                 let root_view = ui::Rooter::view(win, cx);
-                cx.new(|cx| gpui_component::Root::new(root_view.into(), win, cx))
+                cx.new(|cx| gpui_component::Root::new(root_view, win, cx))
             })
             .unwrap();
         });

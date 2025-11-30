@@ -1,6 +1,6 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, ContextModal, Icon, IconName, Side,
+    ActiveTheme, Icon, IconName, Side, WindowExt,
     avatar::Avatar,
     h_flex,
     notification::Notification,
@@ -10,7 +10,7 @@ use gpui_component::{
 use crate::{
     auth::Auth,
     ui::{
-        _components::{self, NavStack, NavState},
+        _components::{self, NavStack, NavState, RenderBounds},
         home::browse::BrowseUi,
     },
     util::MapAsync,
@@ -28,6 +28,7 @@ actions!(user, [MyAction, SignOut]);
 pub struct HomeUi {
     auth: Entity<Auth>,
     nav_stack: Entity<NavStack>,
+    render_bounds: Entity<RenderBounds>,
 
     browse_ui: Entity<BrowseUi>,
 
@@ -40,6 +41,7 @@ pub struct HomeUi {
 
 impl HomeUi {
     fn new(auth: Entity<Auth>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let scroll_bounds = cx.new(|_cx| RenderBounds::new());
         let nav_stack = cx.new(|_cx| NavStack::new());
 
         let auth_sub = cx.subscribe_in(&auth, window, |this, _, event, window, cx| {
@@ -55,11 +57,18 @@ impl HomeUi {
             };
         });
 
-        let browse_ui = BrowseUi::view(auth.clone(), nav_stack.clone(), window, cx);
+        let browse_ui = BrowseUi::view(
+            auth.clone(),
+            nav_stack.clone(),
+            scroll_bounds.clone(),
+            window,
+            cx,
+        );
 
         Self {
             auth,
             nav_stack,
+            render_bounds: scroll_bounds,
             browse_ui,
             user_spaces: Vec::new(),
             user: None,
@@ -172,6 +181,19 @@ impl Render for HomeUi {
                     .child(self.render_sidebar(cx)),
             )
             .child(div().size_full().child(self.browse_ui.clone()))
+            .child({
+                let this = cx.entity();
+                canvas(
+                    move |_, _, _| {},
+                    move |el_bounds, _d, _w, cx| {
+                        this.update(cx, |this, cx| {
+                            this.render_bounds.update(cx, |bounds, cx| {
+                                bounds.h_event(el_bounds.size.height).map(|ev| cx.emit(ev));
+                            })
+                        });
+                    },
+                )
+            })
     }
 }
 

@@ -1,5 +1,5 @@
 use gpui::{prelude::FluentBuilder, *};
-use gpui_component::{ActiveTheme, ContextModal, Root, notification::Notification};
+use gpui_component::{ActiveTheme, Root, WindowExt, notification::Notification};
 use header::HeaderUi;
 
 use crate::{

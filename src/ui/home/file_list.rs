@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, ContextModal, IndexPath, label::Label, notification::Notification, v_flex,
+    ActiveTheme, IndexPath, WindowExt, label::Label, notification::Notification, v_flex,
     v_virtual_list,
 };
 

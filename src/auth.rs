@@ -352,7 +352,7 @@ impl InnerAuth {
             let rl = self.session_id.read().unwrap();
             let sid = match &*rl {
                 Some(sid) => sid.clone(),
-                None => return Err(AppError::message("No sign in instance")),
+                None => return Err(AppError::message("No session id")),
             };
             drop(rl);
 
