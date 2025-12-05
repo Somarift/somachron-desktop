@@ -1,4 +1,4 @@
-use tauri::{menu::MenuItem, AppHandle, Manager};
+use tauri::{menu::MenuItem, AppHandle, LogicalPosition, Manager, Position};
 
 use crate::app::commands::{auth, space, user};
 
@@ -50,6 +50,24 @@ pub fn run() {
         .setup(|app| {
             app.manage(app::auth::Auth::init(app.handle().clone()));
             replace_mac_quit(app.app_handle())?;
+
+            tauri::WebviewWindowBuilder::new(
+                app.handle(),
+                "main",
+                tauri::WebviewUrl::App("index.html".into()),
+            )
+            .resizable(true)
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .title("Somachron")
+            .decorations(true)
+            .inner_size(1200., 800.)
+            .hidden_title(true)
+            .fullscreen(false)
+            .center()
+            .min_inner_size(900., 800.)
+            .traffic_light_position(Position::Logical(LogicalPosition::new(12., 18.)))
+            .build()?;
+
             Ok(())
         })
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -77,6 +95,9 @@ pub fn run() {
             space::get_space_users,
             space::create_space,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|handle, event| {
+            let _ = (handle, event);
+        });
 }

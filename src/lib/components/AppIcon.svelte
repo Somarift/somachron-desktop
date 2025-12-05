@@ -7,7 +7,7 @@
 
 <div
     class={cn(
-        "bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-md p-0.5",
+        "bg-primary text-primary-foreground flex size-6 items-center justify-center rounded-sm p-0.5",
         className,
     )}
 >

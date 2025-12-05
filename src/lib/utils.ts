@@ -1,7 +1,7 @@
 import { clsx, type ClassValue } from "clsx";
 import { toast } from "svelte-sonner";
 import { twMerge } from "tailwind-merge";
-import type { ApiEmpty } from "./models/api";
+import type { ApiEmpty, IpcResult } from "./models/api";
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
@@ -25,16 +25,16 @@ export function isTypeApiEmpty(value: any): value is ApiEmpty {
     return isType<ApiEmpty>(value, "req_id");
 }
 
-export async function validateApiFront<T>(data: Promise<T>, def: T, suppressErr: boolean = false, msg: string = ""): Promise<T> {
+export async function validateApiFront<T>(data: Promise<IpcResult<T>>, def: T, suppressErr: boolean = false, msg: string = ""): Promise<T> {
     let res = await data;
-    if (isTypeApiEmpty(res)) {
+    if (res.type === "error") {
         if (!suppressErr) {
-            let message = msg.length > 0 ? msg + " - " + res.message : res.message;
+            let message = msg.length > 0 ? msg + " - " + res.error.message : res.error.message;
             toast.error(message);
         }
         return def;
     }
-    return res;
+    return res.data;
 }
 
 export function humanFileSize(bytes: number, dp = 1) {

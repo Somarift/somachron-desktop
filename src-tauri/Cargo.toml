@@ -28,3 +28,4 @@ tauri-plugin-os = "2"
 log = "0.4"
 tauri-plugin-http = { version = "2", features = ["json"] }
 base64 = "0.22"
+tao = "0.34"

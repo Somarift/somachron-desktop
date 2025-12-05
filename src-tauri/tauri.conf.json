@@ -10,26 +10,7 @@
         "frontendDist": "../build"
     },
     "app": {
-        "windows": [
-            {
-                "title": "Somachron",
-                "width": 1200,
-                "height": 800,
-                "decorations": true,
-                "titleBarStyle": "Overlay",
-                "hiddenTitle": true,
-                "transparent": false,
-                "resizable": true,
-                "fullscreen": false,
-                "center": true,
-                "minWidth": 800,
-                "minHeight": 800,
-                "trafficLightPosition": {
-                    "x": 12,
-                    "y": 22
-                }
-            }
-        ],
+        "windows": [],
         "security": {
             "csp": "default-src 'self' ipc: http://ipc.localhost; worker-src 'self' blob: tauri://localhost/*; connect-src 'self' https://clerk.somachron.shank03.com https://*.clerk.accounts.dev; script-src 'self' https://clerk.somachron.shank03.com; img-src 'self' asset: http://asset.localhost; style-src 'unsafe-inline' 'self' https://fonts.googleapis.com"
         }

@@ -243,12 +243,13 @@ impl Auth {
     }
 
     pub async fn attempt_first_factor(&self, code: &str) -> IpcResult<()> {
-        let g_sia = self.sign_in_id.read().await;
-        let sia = match &*g_sia {
-            Some(s) => s.clone(),
-            None => return Err(IpcError::message("No sign in instance")),
+        let sia = {
+            let g_sia = self.sign_in_id.read().await;
+            match &*g_sia {
+                Some(s) => s.clone(),
+                None => return Err(IpcError::message("No sign in instance")),
+            }
         };
-        drop(g_sia);
 
         let res = self
                 .client
@@ -318,12 +319,13 @@ impl Auth {
     }
 
     pub async fn fetch_token(&self) -> IpcResult<()> {
-        let g_sid = self.session_id.read().await;
-        let sid = match &*g_sid {
-            Some(s) => s.clone(),
-            None => return Err(IpcError::message("No session id")),
+        let sid = {
+            let g_sid = self.session_id.read().await;
+            match &*g_sid {
+                Some(s) => s.clone(),
+                None => return Err(IpcError::message("No session id")),
+            }
         };
-        drop(g_sid);
 
         let res = self
             .client
