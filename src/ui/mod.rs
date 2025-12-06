@@ -142,11 +142,11 @@ impl Rooter {
                         match result {
                             Ok(_) => cx.emit(AuthEvent::Session(SessionState::SignedIn)),
                             Err(err) => {
+                                window.push_notification(
+                                    Notification::error(err.message).autohide(true),
+                                    cx,
+                                );
                                 if inner.has_session() {
-                                    window.push_notification(
-                                        Notification::error(err.message).autohide(true),
-                                        cx,
-                                    );
                                     cx.emit(AuthEvent::Session(SessionState::SignedIn));
                                 } else {
                                     cx.emit(AuthEvent::Session(SessionState::LoggedOut));

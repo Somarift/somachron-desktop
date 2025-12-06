@@ -1,8 +1,9 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, Sizable, StyledExt,
+    ActiveTheme, Disableable, Icon, Sizable, StyledExt, WindowExt,
     button::{Button, ButtonVariants},
     input::{Input, InputState, OtpInput, OtpState},
+    notification::Notification,
 };
 
 use crate::{
@@ -15,7 +16,6 @@ pub struct LoginUi {
     auth: Entity<Auth>,
     email_input: Entity<InputState>,
     otp_input: Entity<OtpState>,
-    err_text: Option<String>,
     loading: bool,
     otp_verification: bool,
     _subscriptions: Vec<Subscription>,
@@ -26,18 +26,21 @@ impl LoginUi {
         let email_input = cx.new(|cx| InputState::new(window, cx).placeholder("user@email.com"));
         let otp_input = cx.new(|cx| OtpState::new(6, window, cx));
 
-        let otp_sub = cx.subscribe(&otp_input, |this, _, event, cx| match event {
-            gpui_component::input::InputEvent::Change => {
-                this.verify_otp(cx);
-            }
-            _ => (),
-        });
+        let otp_sub = cx.subscribe_in(
+            &otp_input,
+            window,
+            |this, _, event, window, cx| match event {
+                gpui_component::input::InputEvent::Change => {
+                    this.verify_otp(window, cx);
+                }
+                _ => (),
+            },
+        );
 
         Self {
             auth,
             email_input,
             otp_input,
-            err_text: None,
             loading: false,
             otp_verification: false,
             _subscriptions: vec![otp_sub],
@@ -48,9 +51,9 @@ impl LoginUi {
         cx.new(|cx| Self::new(auth, window, cx))
     }
 
-    fn sign_in(&self, cx: &mut Context<Self>) {
+    fn sign_in(&self, window: &mut Window, cx: &mut Context<Self>) {
         let email = self.email_input.read(cx).value();
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let inner = this
                 .update(cx, |this, cx| {
                     this.loading = true;
@@ -70,22 +73,22 @@ impl LoginUi {
                             inner.prepare_first_factor(&idn).await.map(|_| inner)
                         })
                         .await
-                        .map_async(async move |inner| inner.fetch_token().await)
-                        .await
                 })
                 .await;
 
-            this.update(cx, |this, cx| {
+            this.update_in(cx, |this, window, cx| {
                 this.loading = false;
                 match result {
                     Ok(_) => {
                         this.otp_verification = true;
-                        this.err_text = None;
-
                         this.otp_input.focus_handle(cx);
                     }
                     Err(err) => {
-                        this.err_text = Some(format!("Failed to login: {err:?}"));
+                        window.push_notification(
+                            Notification::error(format!("Failed to login: {}", err.message))
+                                .autohide(true),
+                            cx,
+                        );
                     }
                 };
                 cx.notify();
@@ -95,7 +98,7 @@ impl LoginUi {
         .detach();
     }
 
-    fn verify_otp(&mut self, cx: &mut Context<Self>) {
+    fn verify_otp(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let code = self.otp_input.read(cx).value();
         if code.len() != 6 {
             return;
@@ -104,17 +107,23 @@ impl LoginUi {
         let code = code.clone();
         self.loading = true;
 
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let inner = this
                 .read_with(cx, |this, cx| this.auth.read(cx).inner())
                 .unwrap();
 
             let result = cx
                 .background_executor()
-                .spawn(async move { inner.attempt_first_factor(&code).await })
+                .spawn(async move {
+                    inner
+                        .attempt_first_factor(&code)
+                        .await
+                        .map_async(async move |_| inner.fetch_token().await)
+                        .await
+                })
                 .await;
 
-            this.update(cx, |this, cx| {
+            this.update_in(cx, |this, window, cx| {
                 this.loading = false;
                 match result {
                     Ok(_) => {
@@ -125,7 +134,8 @@ impl LoginUi {
                         });
                     }
                     Err(err) => {
-                        this.err_text = Some(err.message);
+                        window
+                            .push_notification(Notification::error(err.message).autohide(true), cx);
                     }
                 };
                 cx.notify();
@@ -148,7 +158,6 @@ impl LoginUi {
             state.focus_handle(cx);
             cx.notify();
         });
-        self.err_text = None;
     }
 }
 
@@ -221,15 +230,7 @@ impl Render for LoginUi {
                                                 .cleanable(true)
                                                 .disabled(self.otp_verification)
                                                 .line_clamp(1),
-                                        )
-                                        .when_some(self.err_text.clone(), |d, err_text| {
-                                            d.child(
-                                                div()
-                                                    .text_sm()
-                                                    .text_color(cx.theme().danger)
-                                                    .child(err_text),
-                                            )
-                                        }),
+                                        ),
                                 )
                                 .when(self.otp_verification, |d| {
                                     d.child(
@@ -256,8 +257,8 @@ impl Render for LoginUi {
                                             .primary()
                                             .cursor_pointer()
                                             .label("Login")
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.sign_in(cx);
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.sign_in(window, cx);
                                             })),
                                     )
                                 })

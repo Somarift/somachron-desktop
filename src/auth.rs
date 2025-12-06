@@ -5,11 +5,13 @@ use std::{
 
 use base64::Engine;
 use gpui::*;
+use reqwest::header::{HOST, ORIGIN, REFERER, USER_AGENT};
 use serde::Deserialize;
 
 use crate::{
     err::AppError,
     store::{Cookie, Store},
+    util,
 };
 
 const CLERK_API_URL: &str = "https://clerk.somachron.shank03.com";
@@ -102,9 +104,20 @@ impl InnerAuth {
         let client = reqwest::ClientBuilder::new()
             .default_headers({
                 let mut headers = reqwest::header::HeaderMap::new();
-                headers.append("Host", "clerk.somachron.shank03.com".parse().unwrap());
-                headers.append("Origin", "https://somachron.shank03.com".parse().unwrap());
-                headers.append("Referer", "https://somachron.shank03.com".parse().unwrap());
+                headers.append(HOST, "clerk.somachron.shank03.com".parse().unwrap());
+                headers.append(ORIGIN, "https://somachron.shank03.com".parse().unwrap());
+                headers.append(REFERER, "https://somachron.shank03.com".parse().unwrap());
+
+                headers.append(
+                    USER_AGENT,
+                    format!(
+                        "Somachron-Desktop/version ({}-{})",
+                        util::os_name(),
+                        util::os_version()
+                    )
+                    .parse()
+                    .unwrap(),
+                );
                 headers
             })
             .build()
@@ -234,12 +247,13 @@ impl InnerAuth {
 
     pub async fn prepare_first_factor(&self, email_address_id: &str) -> Result<(), AppError> {
         self.rt.block_on(async move {
-            let g_sia = self.sign_in_id.read().unwrap();
-            let sia = match &*g_sia {
-                Some(s) => s.clone(),
-                None => return Err(AppError::message("No sign in instance")),
+            let sia = {
+                let g_sia = self.sign_in_id.read().unwrap();
+                match &*g_sia {
+                    Some(s) => s.clone(),
+                    None => return Err(AppError::message("No sign in instance")),
+                }
             };
-            drop(g_sia);
 
             let res = self
                 .client
@@ -271,12 +285,13 @@ impl InnerAuth {
 
     pub async fn attempt_first_factor(&self, code: &str) -> Result<(), AppError> {
         self.rt.block_on(async move {
-            let g_sia = self.sign_in_id.read().unwrap();
-            let sia = match &*g_sia {
-                Some(s) => s.clone(),
-                None => return Err(AppError::message("No sign in instance")),
+            let sia = {
+                let g_sia = self.sign_in_id.read().unwrap();
+                match &*g_sia {
+                    Some(s) => s.clone(),
+                    None => return Err(AppError::message("No sign in instance")),
+                }
             };
-            drop(g_sia);
 
             let res = self
                 .client
@@ -328,13 +343,15 @@ impl InnerAuth {
             .and_then(|v| Ok(v.as_secs()))
             .unwrap_or(1);
 
-        if current_secs > spec.exp {
-            println!(
-                "Fetching token: current: {}, exp: {}",
-                current_secs, spec.exp
-            );
-            self.fetch_token().await?;
+        if current_secs <= spec.exp {
+            return Ok(spec.token);
         }
+
+        println!(
+            "Fetching token: current: {}, exp: {}",
+            current_secs, spec.exp
+        );
+        self.fetch_token().await?;
 
         let spec = {
             let gt = self.token_spec.read().unwrap();
@@ -349,12 +366,15 @@ impl InnerAuth {
 
     pub async fn fetch_token(&self) -> Result<(), AppError> {
         self.rt.block_on(async move {
-            let rl = self.session_id.read().unwrap();
-            let sid = match &*rl {
-                Some(sid) => sid.clone(),
-                None => return Err(AppError::message("No session id")),
+            let sid = {
+                let rl = self.session_id.read().unwrap();
+                match &*rl {
+                    Some(sid) => sid.clone(),
+                    None => return Err(AppError::message("No session id")),
+                }
             };
-            drop(rl);
+
+            let mut wl = self.token_spec.write().unwrap();
 
             let res = self
                 .client
@@ -368,17 +388,20 @@ impl InnerAuth {
                 .await
                 .map_err(AppError::err)?;
 
-            if res.status().is_success() {
-                let data: TokenPayload = res.json().await.map_err(AppError::err)?;
-
-                {
-                    let mut gt = self.token_spec.write().unwrap();
-                    *gt = Some(AuthToken::new(data.jwt)?);
+            match res.status() {
+                status if status.is_success() => {
+                    let data: TokenPayload = res.json().await.map_err(AppError::err)?;
+                    *wl = Some(AuthToken::new(data.jwt)?);
+                    Ok(())
                 }
-                Ok(())
-            } else {
-                let err = self.get_error(res).await?;
-                Err(err)
+                status => {
+                    if status.is_client_error() {
+                        let mut wl = self.session_id.write().unwrap();
+                        *wl = None;
+                    }
+                    let err = self.get_error(res).await?;
+                    Err(err)
+                }
             }
         })
     }
