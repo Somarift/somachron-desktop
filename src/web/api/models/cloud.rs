@@ -28,6 +28,7 @@ pub mod res {
         pub media_type: super::MediaType,
         pub user: Option<String>,
         pub width: i32,
+        pub height: i32,
     }
 
     #[derive(Debug, Deserialize, Clone)]

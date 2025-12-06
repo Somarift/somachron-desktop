@@ -2,13 +2,15 @@ use std::ops::Range;
 
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, StyledExt, WindowExt, notification::Notification,
+    ActiveTheme, Icon, IconName, StyleSized, StyledExt, WindowExt, notification::Notification,
     scroll::ScrollbarAxis,
 };
 
 use crate::{
     auth::Auth,
-    ui::_components::{self, MEDIA_HEIGHT, NavEvent, NavStack, NavState, RenderBounds},
+    ui::_components::{
+        self, MEDIA_HEIGHT, NavEvent, NavStack, NavState, RenderBounds, loading_icon,
+    },
     util::MapAsync,
     web::api::{
         self,
@@ -140,13 +142,6 @@ impl BrowseUi {
         }
         this.item_rows.push(start..this.files.len());
 
-        // for range in this.item_rows.iter().take(10) {
-        //     range.clone().for_each(|i| {
-        //         print!("{} -- ", this.files.get(i).unwrap().file_name);
-        //     });
-        //     println!();
-        // }
-
         this.visible_rows = this
             .item_rows
             .len()
@@ -257,6 +252,8 @@ impl BrowseUi {
                     Err(err) => window
                         .push_notification(Notification::error(err.message).autohide(true), cx),
                 };
+
+                Self::update_visible_state(this, cx);
                 cx.notify();
             })
             .unwrap();
@@ -422,38 +419,40 @@ impl BrowseUi {
                         .rounded_md()
                         .relative()
                         .group(SharedString::new(file.id.as_str()))
-                        .bg(cx.theme().primary)
-                        .child(
-                            div()
-                                .absolute()
-                                .h_full()
-                                .w(px(file.width as f32))
-                                .rounded_lg()
-                                .child(
-                                    if let Some(MediaState::Loaded(urls)) =
-                                        self.media_states.get(i).cloned()
-                                    {
-                                        div().child(
-                                            img(urls.thumbnail_stream)
-                                                .absolute()
-                                                .inset_0()
-                                                .h(MEDIA_HEIGHT)
-                                                .w(px(file.width as f32))
-                                                .object_fit(ObjectFit::Cover)
-                                                .rounded_lg(),
-                                        )
-                                    } else {
-                                        div().rounded_lg()
-                                    },
-                                ),
-                        )
+                        .flex_shrink_0()
+                        .map(|this| {
+                            if let Some(MediaState::Loaded(urls)) =
+                                self.media_states.get(i).cloned()
+                            {
+                                this.child(
+                                    img(urls.thumbnail_stream)
+                                        .object_fit(ObjectFit::Cover)
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .id(SharedString::new(format!("{i}")))
+                                        .absolute()
+                                        .inset_0()
+                                        .h(MEDIA_HEIGHT)
+                                        .w(px(file.width as f32))
+                                        .rounded_md()
+                                        .overflow_hidden()
+                                        .with_loading(|| {
+                                            loading_icon(|icon| icon.size_4()).into_any_element()
+                                        }),
+                                )
+                            } else {
+                                this.bg(cx.theme().muted)
+                            }
+                        })
                         .child(
                             div()
                                 .absolute()
                                 .bottom_0()
                                 .left_0()
                                 .right_0()
-                                .bg(black().alpha(70.))
+                                .bg(black().opacity(0.3))
+                                .rounded_b_md()
                                 .text_color(white())
                                 .text_sm()
                                 .px_2()
