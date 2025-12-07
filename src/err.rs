@@ -1,3 +1,5 @@
+use tokio::task::JoinError;
+
 #[derive(Debug)]
 pub struct AppError {
     pub status: u16,
@@ -48,6 +50,7 @@ impl AppError {
 
     #[track_caller]
     pub fn err(err: impl std::error::Error) -> Self {
+        let source = err.source();
         let location = std::panic::Location::caller();
         // log::error!(
         //     "Error [{}:{}:{}]: {}",
@@ -59,7 +62,7 @@ impl AppError {
 
         Self {
             status: 500,
-            message: format!("{}", err),
+            message: format!("{} - {:?}", err, source),
             req_id: "".into(),
         }
     }
@@ -80,5 +83,11 @@ impl AppError {
             message: format!("{}", err),
             req_id: "".into(),
         }
+    }
+}
+
+impl From<JoinError> for AppError {
+    fn from(value: JoinError) -> Self {
+        AppError::err(value)
     }
 }

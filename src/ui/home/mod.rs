@@ -9,8 +9,9 @@ use gpui_component::{
 
 use crate::{
     auth::Auth,
+    rt,
     ui::{
-        _components::{self, NavStack, NavState, RenderBounds},
+        _components::{self, NavContext, NavStack, NavState, RenderBounds},
         home::browse::BrowseUi,
     },
     util::MapAsync,
@@ -21,16 +22,14 @@ use crate::{
 };
 
 mod browse;
-mod file_list;
 
 actions!(user, [MyAction, SignOut]);
 
 pub struct HomeUi {
     auth: Entity<Auth>,
     nav_stack: Entity<NavStack>,
+    nav_ctx: NavContext<NavStack>,
     render_bounds: Entity<RenderBounds>,
-
-    browse_ui: Entity<BrowseUi>,
 
     user_spaces: Vec<UserSpaceResponse>,
     user: Option<UserResponse>,
@@ -43,13 +42,13 @@ impl HomeUi {
     fn new(auth: Entity<Auth>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let scroll_bounds = cx.new(|_cx| RenderBounds::new());
         let nav_stack = cx.new(|_cx| NavStack::new());
+        let nav_ctx = NavContext::new(nav_stack.downgrade());
 
         let auth_sub = cx.subscribe_in(&auth, window, |this, _, event, window, cx| {
             match event {
                 crate::auth::AuthEvent::Session(session_state) => match session_state {
                     crate::auth::SessionState::SignedIn => {
-                        this.fetch_user(window, cx);
-                        this.fetch_user_spaces(window, cx);
+                        this.fetch_data(window, cx);
                     }
                     _ => (),
                 },
@@ -57,19 +56,11 @@ impl HomeUi {
             };
         });
 
-        let browse_ui = BrowseUi::view(
-            auth.clone(),
-            nav_stack.clone(),
-            scroll_bounds.clone(),
-            window,
-            cx,
-        );
-
         Self {
             auth,
             nav_stack,
+            nav_ctx,
             render_bounds: scroll_bounds,
-            browse_ui,
             user_spaces: Vec::new(),
             user: None,
             loading_sidebar: false,
@@ -82,69 +73,50 @@ impl HomeUi {
         cx.new(|cx| Self::new(auth, window, cx))
     }
 
-    fn fetch_user_spaces(&self, window: &mut Window, cx: &mut Context<Self>) {
+    fn fetch_data(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let inner = self.auth.read(cx).inner();
+
+        let _inner = inner.clone();
+        let user_spaces = rt::spawn(cx, async move {
+            _inner
+                .get_token()
+                .await
+                .map_async(async move |token| api::space::get_user_spaces(token).await)
+                .await
+        });
+
+        let user = rt::spawn(cx, async move {
+            inner
+                .get_token()
+                .await
+                .map_async(async move |token| api::user::get_user(&token).await)
+                .await
+        });
+
         cx.spawn_in(window, async move |this, cx| {
-            let inner = this
-                .update(cx, |this, cx| {
-                    this.loading_sidebar = true;
-                    cx.notify();
+            let _ = this.update(cx, |this, cx| {
+                this.loading_user = true;
+                this.loading_sidebar = true;
+                cx.notify();
+            });
 
-                    this.auth.read(cx).inner()
-                })
-                .unwrap();
+            let user_spaces = user_spaces.await.flatten();
+            let user = user.await.flatten();
 
-            let user_spaces = cx
-                .background_executor()
-                .spawn(async move {
-                    inner
-                        .get_token()
-                        .await
-                        .map_async(async move |token| api::space::get_user_spaces(token).await)
-                        .await
-                })
-                .await;
-
-            this.update_in(cx, |this, window, cx| {
+            let _ = this.update_in(cx, |this, window, cx| {
                 this.loading_sidebar = false;
                 match user_spaces {
                     Ok(user_spaces) => {
                         this.user_spaces = user_spaces;
                     }
                     Err(err) => {
-                        window
-                            .push_notification(Notification::error(err.message).autohide(true), cx);
+                        window.push_notification(
+                            Notification::error(err.message).autohide(false),
+                            cx,
+                        );
                     }
                 };
-                cx.notify();
-            })
-            .unwrap();
-        })
-        .detach();
-    }
 
-    fn fetch_user(&self, window: &mut Window, cx: &mut Context<Self>) {
-        cx.spawn_in(window, async move |this, cx| {
-            let inner = this
-                .update(cx, |this, cx| {
-                    this.loading_user = true;
-                    cx.notify();
-
-                    this.auth.read(cx).inner()
-                })
-                .unwrap();
-
-            let user = cx
-                .background_executor()
-                .spawn(async move {
-                    inner
-                        .get_token()
-                        .await
-                        .map_async(async move |token| api::user::get_user(&token).await)
-                        .await
-                })
-                .await;
-
-            this.update_in(cx, |this, window, cx| {
                 this.loading_user = false;
                 match user {
                     Ok(user) => {
@@ -154,14 +126,13 @@ impl HomeUi {
                         window.push_notification(
                             Notification::error(&err.message)
                                 .title("Failed to fetch user")
-                                .autohide(true),
+                                .autohide(false),
                             cx,
                         );
                     }
                 };
                 cx.notify();
-            })
-            .unwrap();
+            });
         })
         .detach();
     }
@@ -180,7 +151,9 @@ impl Render for HomeUi {
                     .rounded_tr_xl()
                     .child(self.render_sidebar(cx)),
             )
-            .child(div().size_full().child(self.browse_ui.clone()))
+            .when_some(self.nav_stack.read(cx).current(), |el, view| {
+                el.child(div().size_full().child(view.clone()))
+            })
             .child({
                 let this = cx.entity();
                 canvas(
@@ -255,15 +228,23 @@ impl HomeUi {
                                 el.children(self.user_spaces.iter().cloned().map(|us| {
                                     SidebarMenuItem::new(&us.space.name)
                                         .icon(Icon::new(IconName::GalleryVerticalEnd))
-                                        .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                            this.nav_stack.update(cx, |_stack, cx| {
-                                                cx.emit(_components::NavEvent::Reset(
-                                                    NavState::new(
-                                                        us.space.id.clone(),
-                                                        us.folder.clone(),
+                                        .on_click(cx.listener(move |this, _ev, window, cx| {
+                                            this.nav_ctx.update(cx, |ctx, cx| {
+                                                ctx.clear_and_push(
+                                                    BrowseUi::view(
+                                                        this.auth.clone(),
+                                                        this.nav_ctx.clone(),
+                                                        this.render_bounds.clone(),
+                                                        NavState::new(
+                                                            us.space.id.clone(),
+                                                            us.folder.clone(),
+                                                        ),
+                                                        window,
+                                                        cx,
                                                     ),
-                                                ));
-                                            })
+                                                    cx,
+                                                );
+                                            });
                                         }))
                                 }))
                             },

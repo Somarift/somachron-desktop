@@ -2,14 +2,15 @@ use std::ops::Range;
 
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, StyleSized, StyledExt, WindowExt, notification::Notification,
+    ActiveTheme, Icon, IconName, StyledExt, WindowExt, notification::Notification,
     scroll::ScrollbarAxis,
 };
 
 use crate::{
     auth::Auth,
+    rt,
     ui::_components::{
-        self, MEDIA_HEIGHT, NavEvent, NavStack, NavState, RenderBounds, loading_icon,
+        self, MEDIA_HEIGHT, NavContext, NavStack, NavState, Navigation, RenderBounds, loading_icon,
     },
     util::MapAsync,
     web::api::{
@@ -28,10 +29,11 @@ enum MediaState {
 
 pub struct BrowseUi {
     auth: Entity<Auth>,
-    nav_stack: Entity<NavStack>,
+    nav_ctx: NavContext<NavStack>,
     render_bounds: Entity<RenderBounds>,
+    image_cache: Entity<RetainAllImageCache>,
 
-    current_nav: Option<NavState>,
+    current_nav: NavState,
     folders: Vec<FolderResponse>,
     files: Vec<FileMetaReponse>,
     media_states: Vec<MediaState>,
@@ -49,11 +51,14 @@ pub struct BrowseUi {
 impl BrowseUi {
     fn new(
         auth: Entity<Auth>,
-        nav_stack: Entity<NavStack>,
+        nav_ctx: NavContext<NavStack>,
         render_bounds: Entity<RenderBounds>,
+        current_nav: NavState,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let image_cache = RetainAllImageCache::new(cx);
+
         let size_sub = cx.subscribe_in(
             &render_bounds,
             window,
@@ -64,23 +69,24 @@ impl BrowseUi {
             },
         );
 
-        let nav_sub = cx.subscribe_in(&nav_stack, window, |this, _entity, event, window, cx| {
-            this.reset_state();
+        // let nav_sub = cx.subscribe_in(&nav_ctx, window, |this, _entity, event, window, cx| {
+        //     this.reset_state();
 
-            this.nav_stack.update(cx, |stack, cx| {
-                stack.on_event(event);
-                this.current_nav = stack.top();
-                cx.notify();
-            });
+        //     this.nav_stack.update(cx, |stack, cx| {
+        //         stack.on_event(event);
+        //         this.current_nav = stack.top();
+        //         cx.notify();
+        //     });
 
-            this.fetch_fs(window, cx);
-        });
+        //     this.fetch_fs(window, cx);
+        // });
 
         Self {
             auth,
-            nav_stack,
+            nav_ctx,
             render_bounds,
-            current_nav: None,
+            image_cache,
+            current_nav,
             folders: Vec::new(),
             files: Vec::new(),
             media_states: Vec::new(),
@@ -90,28 +96,23 @@ impl BrowseUi {
             scroll_offset: px(0.),
             scroll_handle: ScrollHandle::new(),
             loading: false,
-            _subscriptions: vec![nav_sub, size_sub],
+            _subscriptions: vec![size_sub],
         }
     }
 
     pub fn view(
         auth: Entity<Auth>,
-        nav_stack: Entity<NavStack>,
+        nav_ctx: NavContext<NavStack>,
         render_bounds: Entity<RenderBounds>,
+        current_nav: NavState,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| Self::new(auth, nav_stack, render_bounds, window, cx))
-    }
-
-    fn reset_state(&mut self) {
-        self.folders.clear();
-        self.files.clear();
-        self.media_states.clear();
-        self.item_rows.clear();
-        self.scroll_offset = px(0.);
-        self.visible_rows = 0;
-        self.visible_item_range = 0..0;
+        cx.new(|cx| {
+            let mut entity = Self::new(auth, nav_ctx, render_bounds, current_nav, window, cx);
+            entity.fetch_fs(window, cx);
+            entity
+        })
     }
 
     fn compute_visible_grid(this: &mut Self, cx: &mut Context<Self>) {
@@ -200,45 +201,55 @@ impl BrowseUi {
     }
 
     fn fetch_fs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(state) = self.current_nav.as_ref().cloned() else {
-            return;
-        };
+        let state = self.current_nav.clone();
+        let space_id = state.space_id.clone();
+        let folder_id = state.folder_id.clone();
+
+        let inner = self.auth.read(cx).inner();
+
+        let _inner = inner.clone();
+        let folders = rt::spawn(cx, async move {
+            _inner
+                .get_token()
+                .await
+                .map_async(async move |token| {
+                    api::cloud::list_folders(&token, &space_id.clone(), &folder_id.clone()).await
+                })
+                .await
+        });
+
+        let files = rt::spawn(cx, async move {
+            inner
+                .get_token()
+                .await
+                .map_async(async move |token| {
+                    api::cloud::list_files(
+                        &token,
+                        &state.space_id.clone(),
+                        &state.folder_id.clone(),
+                    )
+                    .await
+                })
+                .await
+        });
 
         cx.spawn_in(window, async move |this, cx| {
-            let inner = this
-                .update(cx, |this, cx| {
-                    this.loading = true;
-                    cx.notify();
+            let _ = this.update(cx, |this, cx| {
+                this.loading = true;
+                cx.notify();
+            });
 
-                    this.auth.read(cx).inner()
-                })
-                .unwrap();
+            let folders = folders.await.flatten();
+            let files = files.await.flatten();
 
-            let (folders, files) = cx
-                .background_executor()
-                .spawn(async move {
-                    inner
-                        .get_token()
-                        .await
-                        .map_async(async move |token| {
-                            Ok(futures::join!(
-                                api::cloud::list_folders(&token, &state.space_id, &state.folder_id),
-                                api::cloud::list_files(&token, &state.space_id, &state.folder_id)
-                            ))
-                        })
-                        .await
-                        .unwrap()
-                })
-                .await;
-
-            this.update_in(cx, |this, window, cx| {
+            let _ = this.update_in(cx, |this, window, cx| {
                 this.loading = false;
                 match folders {
                     Ok(folders) => {
                         this.folders = folders;
                     }
                     Err(err) => window
-                        .push_notification(Notification::error(err.message).autohide(true), cx),
+                        .push_notification(Notification::error(err.message).autohide(false), cx),
                 };
 
                 match files {
@@ -250,13 +261,12 @@ impl BrowseUi {
                         this.scroll_offset = px(0.); // invalidate
                     }
                     Err(err) => window
-                        .push_notification(Notification::error(err.message).autohide(true), cx),
+                        .push_notification(Notification::error(err.message).autohide(false), cx),
                 };
 
                 Self::update_visible_state(this, cx);
                 cx.notify();
-            })
-            .unwrap();
+            });
         })
         .detach();
     }
@@ -268,9 +278,7 @@ impl BrowseUi {
         index: usize,
         file_id: String,
     ) {
-        let Some(nav_state) = this.current_nav.as_ref().cloned() else {
-            return;
-        };
+        let nav_state = this.current_nav.clone();
 
         let Some(state) = this.media_states.get_mut(index) else {
             return;
@@ -291,19 +299,20 @@ impl BrowseUi {
                 .read_with(cx, |this, cx| this.auth.read(cx).inner())
                 .unwrap();
 
-            let urls = cx
-                .background_spawn(async move {
-                    inner
-                        .get_token()
-                        .await
-                        .map_async(async move |token| {
-                            api::cloud::get_stream_urls(&token, &nav_state.space_id, &file_id).await
-                        })
-                        .await
-                })
-                .await;
+            let urls = rt::spawn(cx, async move {
+                inner
+                    .get_token()
+                    .await
+                    .map_async(async move |token| {
+                        api::cloud::get_stream_urls(&token, &nav_state.space_id, &file_id).await
+                    })
+                    .await
+                    .unwrap()
+            })
+            .unwrap()
+            .await;
 
-            this.update_in(cx, |this, window, cx| {
+            let _ = this.update_in(cx, |this, window, cx| {
                 match urls {
                     Ok(urls) => {
                         this.media_states
@@ -314,20 +323,30 @@ impl BrowseUi {
                         this.media_states
                             .get_mut(index)
                             .map(|state| *state = MediaState::Error);
-                        window
-                            .push_notification(Notification::error(err.message).autohide(true), cx);
+                        window.push_notification(
+                            Notification::error(err.message).autohide(false),
+                            cx,
+                        );
                     }
                 };
                 cx.notify();
-            })
-            .unwrap();
+            });
         })
         .detach();
     }
 }
 
+impl Navigation for BrowseUi {
+    fn id(&self) -> impl Into<String> {
+        format!(
+            "{}-{}",
+            self.current_nav.space_id, self.current_nav.folder_id
+        )
+    }
+}
+
 impl Render for BrowseUi {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("browse_ui")
             .size_full()
@@ -336,34 +355,32 @@ impl Render for BrowseUi {
             .when(self.loading, |el| {
                 el.child(_components::loading_icon(|icon| icon.size_5()))
             })
-            .when_some(self.current_nav.clone(), |el, state| {
-                el.child(state.space_id)
-                    .child(state.folder_id)
-                    .child(self.render_folder_cards(cx))
-                    .child(self.render_file_list(cx))
-                    .child({
-                        let this = cx.entity();
-                        canvas(
-                            move |_b, _w, _c| {},
-                            move |_b, _d, _w, cx| {
-                                this.update(cx, |this, cx| {
-                                    let size = this.scroll_handle.bounds().size;
-                                    let emitted = this.render_bounds.update(cx, |bounds, cx| {
-                                        bounds
-                                            .w_event(size.width)
-                                            .map(|ev| {
-                                                cx.emit(ev);
-                                                true
-                                            })
-                                            .unwrap_or(false)
-                                    });
-                                    if !emitted {
-                                        Self::update_visible_state(this, cx);
-                                    }
-                                });
-                            },
-                        )
-                    })
+            .child(self.current_nav.space_id.clone())
+            .child(self.current_nav.folder_id.clone())
+            .child(self.render_folder_cards(cx))
+            .child(self.render_file_list(window, cx))
+            .child({
+                let this = cx.entity();
+                canvas(
+                    move |_b, _w, _c| {},
+                    move |_b, _d, _w, cx| {
+                        this.update(cx, |this, cx| {
+                            let size = this.scroll_handle.bounds().size;
+                            let emitted = this.render_bounds.update(cx, |bounds, cx| {
+                                bounds
+                                    .w_event(size.width)
+                                    .map(|ev| {
+                                        cx.emit(ev);
+                                        true
+                                    })
+                                    .unwrap_or(false)
+                            });
+                            if !emitted {
+                                Self::update_visible_state(this, cx);
+                            }
+                        });
+                    },
+                )
             })
             .track_scroll(&self.scroll_handle)
     }
@@ -381,12 +398,20 @@ impl BrowseUi {
                 div()
                     .flex_auto()
                     .id(SharedString::new(folder.id.clone()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.nav_stack.update(cx, |_stack, cx| {
-                            cx.emit(NavEvent::Push(NavState::new(
-                                this.current_nav.as_ref().unwrap().space_id.clone(),
-                                folder.id.clone(),
-                            )));
+                    .on_click(cx.listener(move |this, _ev, window, cx| {
+                        let folder_id = folder.id.as_str();
+                        this.nav_ctx.update(cx, |stack, cx| {
+                            stack.push(
+                                BrowseUi::view(
+                                    this.auth.clone(),
+                                    this.nav_ctx.clone(),
+                                    this.render_bounds.clone(),
+                                    NavState::new(this.current_nav.space_id.as_str(), folder_id),
+                                    window,
+                                    cx,
+                                ),
+                                cx,
+                            );
                         });
                     }))
                     .border_1()
@@ -405,7 +430,11 @@ impl BrowseUi {
             }))
     }
 
-    fn render_file_list(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_file_list(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         div()
             .flex()
             .flex_wrap()
@@ -425,24 +454,31 @@ impl BrowseUi {
                                 self.media_states.get(i).cloned()
                             {
                                 this.child(
-                                    img(urls.thumbnail_stream)
-                                        .object_fit(ObjectFit::Cover)
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .id(SharedString::new(format!("{i}")))
-                                        .absolute()
-                                        .inset_0()
-                                        .h(MEDIA_HEIGHT)
-                                        .w(px(file.width as f32))
-                                        .rounded_md()
-                                        .overflow_hidden()
-                                        .with_loading(|| {
-                                            loading_icon(|icon| icon.size_4()).into_any_element()
-                                        }),
+                                    img(ImageSource::Resource(Resource::Uri(SharedUri::from(
+                                        urls.thumbnail_stream,
+                                    ))))
+                                    .image_cache(&self.image_cache)
+                                    .object_fit(ObjectFit::Cover)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .id(SharedString::new(format!("{i}")))
+                                    .absolute()
+                                    .inset_0()
+                                    .h(MEDIA_HEIGHT)
+                                    .w(px(file.width as f32))
+                                    .rounded_md()
+                                    .overflow_hidden()
+                                    .with_loading(|| {
+                                        loading_icon(|icon| icon.size_4()).into_any_element()
+                                    }),
                                 )
                             } else {
                                 this.bg(cx.theme().muted)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(loading_icon(|icon| icon.size_4()))
                             }
                         })
                         .child(

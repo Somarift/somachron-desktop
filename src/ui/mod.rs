@@ -4,6 +4,7 @@ use header::HeaderUi;
 
 use crate::{
     auth::{Auth, AuthClientEvent, AuthEvent, SessionState},
+    rt,
     ui::{home::HomeUi, login::LoginUi},
 };
 
@@ -112,10 +113,10 @@ impl Rooter {
                 .unwrap();
 
             let _inner = inner.clone();
-            let client_result = cx
-                .background_executor()
-                .spawn(async move { _inner.setup_client().await })
-                .await;
+            let client_result = rt::spawn(cx, async move { _inner.setup_client().await })
+                .unwrap()
+                .await
+                .flatten();
 
             // send event
             let is_ok = client_result.is_ok();
@@ -132,10 +133,15 @@ impl Rooter {
 
             if is_ok {
                 let _inner = inner.clone();
-                let result = cx
-                    .background_executor()
-                    .spawn(async move { _inner.fetch_token().await })
-                    .await;
+                let result = rt::spawn(cx, async move { _inner.fetch_token().await })
+                    .unwrap()
+                    .await
+                    .flatten();
+
+                let has_session = rt::spawn(cx, async move { inner.has_session().await })
+                    .unwrap()
+                    .await
+                    .unwrap();
 
                 this.update_in(cx, |this, window, cx| {
                     this.auth.update(cx, |_, cx| {
@@ -143,10 +149,11 @@ impl Rooter {
                             Ok(_) => cx.emit(AuthEvent::Session(SessionState::SignedIn)),
                             Err(err) => {
                                 window.push_notification(
-                                    Notification::error(err.message).autohide(true),
+                                    Notification::error(err.message).autohide(false),
                                     cx,
                                 );
-                                if inner.has_session() {
+
+                                if has_session {
                                     cx.emit(AuthEvent::Session(SessionState::SignedIn));
                                 } else {
                                     cx.emit(AuthEvent::Session(SessionState::LoggedOut));
@@ -156,6 +163,35 @@ impl Rooter {
                     });
                 })
                 .unwrap();
+            }
+        })
+        .detach();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let inner = this
+                .read_with(cx, |this, cx| this.auth.read(cx).inner())
+                .unwrap();
+            loop {
+                Timer::after(std::time::Duration::from_secs(40)).await;
+
+                let _inner = inner.clone();
+                let result = rt::spawn(cx, async move { _inner.fetch_token().await })
+                    .unwrap()
+                    .await
+                    .flatten();
+
+                if let Err(err) = result {
+                    let _ = this.update_in(cx, |_this, window, cx| {
+                        window.push_notification(
+                            Notification::error(err.message)
+                                .title("Failed to refresh auth")
+                                .autohide(false),
+                            cx,
+                        );
+                    });
+                } else {
+                    println!("Fetched token");
+                }
             }
         })
         .detach();

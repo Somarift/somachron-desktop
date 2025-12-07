@@ -42,6 +42,8 @@ impl Render for HeaderUi {
             .id("header-bar")
             .bg(cx.theme().title_bar)
             .pl(TITLE_BAR_LEFT_PADDING)
+            .border_1()
+            .border_b_1()
             .child(
                 div()
                     .flex()

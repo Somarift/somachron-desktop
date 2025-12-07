@@ -1,40 +1,61 @@
-use std::{any::type_name, pin::Pin, sync::OnceLock, task::Poll};
+use std::{any::type_name, pin::Pin, sync::LazyLock, task::Poll};
 
 use anyhow::anyhow;
 use bytes::{BufMut, BytesMut};
-use futures::{FutureExt, TryStreamExt};
+use futures::FutureExt;
 use gpui::http_client::http;
 use reqwest::header::HeaderValue;
+
+use crate::util;
+
+static TOKIO_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .build()
+        .expect("tokio bruh")
+});
 
 pub struct WebClient {
     client: reqwest::Client,
     user_agent: HeaderValue,
-    rt: tokio::runtime::Handle,
 }
 
 impl WebClient {
     pub fn new() -> Self {
-        let user_agent =
-            reqwest::header::HeaderValue::from_static("Somachron-Desktop/0.1.0 (GPUI - RT)");
+        let user_agent = make_user_agent();
 
-        let client = reqwest::Client::builder()
-            .default_headers({
-                let mut map = reqwest::header::HeaderMap::new();
-                map.insert(http::header::USER_AGENT, user_agent.clone());
-                map
-            })
-            .use_rustls_tls()
-            .connect_timeout(std::time::Duration::from_secs(15))
-            .build()
-            .expect("reqwest bruh");
-
-        let rt = super::get_tokio_rt();
-        Self {
-            client,
-            user_agent,
-            rt,
-        }
+        let client = make_http_client();
+        Self { client, user_agent }
     }
+}
+
+pub fn make_user_agent() -> reqwest::header::HeaderValue {
+    reqwest::header::HeaderValue::from_str(
+        format!(
+            "Somachron-Desktop/0.1.0 ({} - {})",
+            util::os_name(),
+            util::os_version()
+        )
+        .as_str(),
+    )
+    .expect("Failed to create user-agent header")
+}
+
+pub(super) fn make_http_client() -> reqwest::Client {
+    let user_agent = make_user_agent();
+
+    reqwest::Client::builder()
+        .default_headers({
+            let mut map = reqwest::header::HeaderMap::new();
+            map.insert(http::header::USER_AGENT, user_agent.clone());
+            map
+        })
+        .use_rustls_tls()
+        .tcp_nodelay(true)
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .build()
+        .expect("reqwest bruh")
 }
 
 impl gpui::http_client::HttpClient for WebClient {
@@ -76,23 +97,22 @@ impl gpui::http_client::HttpClient for WebClient {
         //     });
         // }
 
-        let rt = self.rt.clone();
         async move {
-            let response = rt.spawn(async move { request.send().await }).await??;
+            println!("requesting {} ...", parts.uri.to_string());
+            TOKIO_RUNTIME.block_on(async move {
+                let response = request.send().await?;
 
-            let headers = response.headers().clone();
-            let mut builder = http::Response::builder()
-                .status(response.status().as_u16())
-                .version(response.version());
-            *builder.headers_mut().unwrap() = headers;
+                let headers = response.headers().clone();
+                let mut builder = http::Response::builder()
+                    .status(response.status().as_u16())
+                    .version(response.version());
+                *builder.headers_mut().unwrap() = headers;
 
-            let bytes = response
-                .bytes_stream()
-                .map_err(futures::io::Error::other)
-                .into_async_read();
-            let body = gpui::http_client::AsyncBody::from_reader(bytes);
+                let bytes = response.bytes().await?;
+                let body = gpui::http_client::AsyncBody::from_bytes(bytes);
 
-            builder.body(body).map_err(|e| anyhow!(e))
+                builder.body(body).map_err(|e| anyhow!(e))
+            })
         }
         .boxed()
     }

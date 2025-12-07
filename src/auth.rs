@@ -1,17 +1,15 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use base64::Engine;
 use gpui::*;
 use reqwest::header::{HOST, ORIGIN, REFERER, USER_AGENT};
 use serde::Deserialize;
+use tokio::sync::RwLock;
 
 use crate::{
     err::AppError,
     store::{Cookie, Store},
-    util,
+    web,
 };
 
 const CLERK_API_URL: &str = "https://clerk.somachron.shank03.com";
@@ -89,7 +87,6 @@ impl AuthToken {
 
 pub struct InnerAuth {
     client: reqwest::Client,
-    rt: tokio::runtime::Handle,
     cookies: RwLock<HashMap<String, Cookie>>,
 
     client_id: RwLock<Option<String>>,
@@ -108,22 +105,11 @@ impl InnerAuth {
                 headers.append(ORIGIN, "https://somachron.shank03.com".parse().unwrap());
                 headers.append(REFERER, "https://somachron.shank03.com".parse().unwrap());
 
-                headers.append(
-                    USER_AGENT,
-                    format!(
-                        "Somachron-Desktop/version ({}-{})",
-                        util::os_name(),
-                        util::os_version()
-                    )
-                    .parse()
-                    .unwrap(),
-                );
+                headers.append(USER_AGENT, web::make_user_agent());
                 headers
             })
             .build()
             .unwrap();
-
-        let rt = super::web::get_tokio_rt();
 
         let store = Store::global_get(cx);
         let cookies = store.cookies.clone();
@@ -133,7 +119,6 @@ impl InnerAuth {
 
         Self {
             client,
-            rt,
             cookies: RwLock::new(cookies),
             client_id: RwLock::new(client_id),
             session_id: RwLock::new(session_id),
@@ -142,219 +127,196 @@ impl InnerAuth {
         }
     }
 
-    pub fn has_session(&self) -> bool {
-        self.session_id.read().unwrap().is_some()
+    pub async fn has_session(&self) -> bool {
+        self.session_id.read().await.is_some()
     }
 
     pub async fn setup_client(&self) -> Result<(), AppError> {
-        self.rt.block_on(async move {
-            {
-                let rl = self.client_id.read().unwrap();
-                if let Some(_) = &*rl {
-                    return Ok(());
-                }
+        println!("Setting up client");
+        {
+            let rl = self.client_id.read().await;
+            if let Some(_) = &*rl {
+                return Ok(());
             }
+        }
 
-            // get environment
-            let res = self
-                .client
-                .get(format!(
-                    "{CLERK_API_URL}/v1/environment{CLERK_QUERY_VERSION}"
-                ))
-                .send()
-                .await
-                .expect("Failed to send env request");
+        // get environment
+        let res = self
+            .client
+            .get(format!(
+                "{CLERK_API_URL}/v1/environment{CLERK_QUERY_VERSION}"
+            ))
+            .send()
+            .await
+            .expect("Failed to send env request");
 
-            {
-                let cookies = extract_cookies(res.headers());
-                let mut wl = self.cookies.write().unwrap();
-                wl.extend(cookies);
-            }
-
-            if res.status().is_client_error() {
-                let text = res.text().await.unwrap();
-                return Err(AppError::message(format!("Error setting up env: {}", text)));
-            }
-
-            // get client
-            let res = self
-                .client
-                .get(format!("{CLERK_API_URL}/v1/client{CLERK_QUERY_VERSION}"))
-                .send()
-                .await
-                .expect("Failed to send client request");
-
+        {
             let cookies = extract_cookies(res.headers());
-            if res.status().is_client_error() {
-                let text = res.text().await.map_err(AppError::err)?;
-                return Err(AppError::message(format!("Error setting up env: {}", text)));
-            }
+            let mut wl = self.cookies.write().await;
+            wl.extend(cookies);
+        }
 
-            let data: ClientPayload = res.json().await.unwrap();
+        if res.status().is_client_error() {
+            let text = res.text().await.unwrap();
+            return Err(AppError::message(format!("Error setting up env: {}", text)));
+        }
 
-            {
-                let mut wl = self.client_id.write().unwrap();
-                *wl = Some(data.response.id);
-            }
+        // get client
+        let res = self
+            .client
+            .get(format!("{CLERK_API_URL}/v1/client{CLERK_QUERY_VERSION}"))
+            .send()
+            .await
+            .expect("Failed to send client request");
 
-            self.update_cookies(cookies, data.response.cookie_expires_at);
+        let cookies = extract_cookies(res.headers());
+        if res.status().is_client_error() {
+            let text = res.text().await.map_err(AppError::err)?;
+            return Err(AppError::message(format!("Error setting up env: {}", text)));
+        }
 
-            Ok(())
-        })
+        let data: ClientPayload = res.json().await.unwrap();
+
+        {
+            let mut wl = self.client_id.write().await;
+            *wl = Some(data.response.id);
+        }
+
+        self.update_cookies(cookies, data.response.cookie_expires_at)
+            .await;
+
+        Ok(())
     }
 
     pub async fn sign_in(&self, email: &str) -> Result<String, AppError> {
-        self.rt.block_on(async move {
-            let res = self
-                .client
-                .post(format!(
-                    "{CLERK_API_URL}/v1/client/sign_ins{CLERK_QUERY_VERSION}"
-                ))
-                .header(COOKIE_HEADER, self.get_header_cookies())
-                .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
-                .form(&[("identifier", email)])
-                .send()
-                .await
-                .map_err(AppError::err)?;
+        println!("signing in");
+        let res = self
+            .client
+            .post(format!(
+                "{CLERK_API_URL}/v1/client/sign_ins{CLERK_QUERY_VERSION}"
+            ))
+            .header(COOKIE_HEADER, self.get_header_cookies().await)
+            .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
+            .form(&[("identifier", email)])
+            .send()
+            .await
+            .map_err(AppError::err)?;
 
-            let cookies = extract_cookies(res.headers());
+        let cookies = extract_cookies(res.headers());
 
-            if res.status().is_success() {
-                let data: SignInPayload = res.json().await.map_err(AppError::err)?;
-                let idn = data
-                    .response
-                    .supported_first_factors
-                    .and_then(|factors| {
-                        factors
-                            .into_iter()
-                            .find(|f| f.primary && f.strategy.as_str().cmp(CLERK_STRATEGY).is_eq())
-                    })
-                    .ok_or(AppError::message("No primary factor found"))?;
+        if res.status().is_success() {
+            let data: SignInPayload = res.json().await.map_err(AppError::err)?;
+            let idn = data
+                .response
+                .supported_first_factors
+                .and_then(|factors| {
+                    factors
+                        .into_iter()
+                        .find(|f| f.primary && f.strategy.as_str().cmp(CLERK_STRATEGY).is_eq())
+                })
+                .ok_or(AppError::message("No primary factor found"))?;
 
-                {
-                    let mut guard = self.sign_in_id.write().unwrap();
-                    *guard = Some(data.response.id);
-                }
-                self.update_cookies(cookies, data.client.cookie_expires_at);
-
-                Ok(idn.email_address_id)
-            } else {
-                let err = self.get_error(res).await?;
-                Err(err)
+            {
+                let mut guard = self.sign_in_id.write().await;
+                *guard = Some(data.response.id);
             }
-        })
+            self.update_cookies(cookies, data.client.cookie_expires_at)
+                .await;
+
+            Ok(idn.email_address_id)
+        } else {
+            let err = Self::get_error(res).await?;
+            Err(err)
+        }
     }
 
     pub async fn prepare_first_factor(&self, email_address_id: &str) -> Result<(), AppError> {
-        self.rt.block_on(async move {
-            let sia = {
-                let g_sia = self.sign_in_id.read().unwrap();
-                match &*g_sia {
-                    Some(s) => s.clone(),
-                    None => return Err(AppError::message("No sign in instance")),
-                }
-            };
+        println!("prepare first factor");
+        let sia = {
+            let g_sia = self.sign_in_id.read().await;
+            match &*g_sia {
+                Some(s) => s.clone(),
+                None => return Err(AppError::message("No sign in instance")),
+            }
+        };
 
-            let res = self
-                .client
-                .post(format!(
+        let res = self
+            .client
+            .post(format!(
                 "{CLERK_API_URL}/v1/client/sign_ins/{sia}/prepare_first_factor{CLERK_QUERY_VERSION}"
             ))
-                .header(COOKIE_HEADER, self.get_header_cookies())
-                .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
-                .form(&[
-                    ("email_address_id", email_address_id),
-                    ("strategy", CLERK_STRATEGY),
-                ])
-                .send()
-                .await
-                .map_err(AppError::err)?;
+            .header(COOKIE_HEADER, self.get_header_cookies().await)
+            .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
+            .form(&[
+                ("email_address_id", email_address_id),
+                ("strategy", CLERK_STRATEGY),
+            ])
+            .send()
+            .await
+            .map_err(AppError::err)?;
 
-            let cookies = extract_cookies(res.headers());
+        let cookies = extract_cookies(res.headers());
 
-            if res.status().is_success() {
-                let data: SignInPayload = res.json().await.map_err(AppError::err)?;
-                self.update_cookies(cookies, data.client.cookie_expires_at);
-                Ok(())
-            } else {
-                let err = self.get_error(res).await?;
-                Err(err)
-            }
-        })
+        if res.status().is_success() {
+            let data: SignInPayload = res.json().await.map_err(AppError::err)?;
+            self.update_cookies(cookies, data.client.cookie_expires_at)
+                .await;
+            Ok(())
+        } else {
+            let err = Self::get_error(res).await?;
+            Err(err)
+        }
     }
 
     pub async fn attempt_first_factor(&self, code: &str) -> Result<(), AppError> {
-        self.rt.block_on(async move {
-            let sia = {
-                let g_sia = self.sign_in_id.read().unwrap();
-                match &*g_sia {
-                    Some(s) => s.clone(),
-                    None => return Err(AppError::message("No sign in instance")),
-                }
-            };
+        println!("attempt first factor");
+        let sia = {
+            let g_sia = self.sign_in_id.read().await;
+            match &*g_sia {
+                Some(s) => s.clone(),
+                None => return Err(AppError::message("No sign in instance")),
+            }
+        };
 
-            let res = self
-                .client
-                .post(format!(
+        let res = self
+            .client
+            .post(format!(
                 "{CLERK_API_URL}/v1/client/sign_ins/{sia}/attempt_first_factor{CLERK_QUERY_VERSION}"
             ))
-                .header(COOKIE_HEADER, self.get_header_cookies())
-                .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
-                .form(&[("code", code), ("strategy", CLERK_STRATEGY)])
-                .send()
-                .await
-                .map_err(AppError::err)?;
+            .header(COOKIE_HEADER, self.get_header_cookies().await)
+            .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
+            .form(&[("code", code), ("strategy", CLERK_STRATEGY)])
+            .send()
+            .await
+            .map_err(AppError::err)?;
 
-            let cookies = extract_cookies(res.headers());
+        let cookies = extract_cookies(res.headers());
 
-            if res.status().is_success() {
-                let data: SignInPayload = res.json().await.map_err(AppError::err)?;
+        if res.status().is_success() {
+            let data: SignInPayload = res.json().await.map_err(AppError::err)?;
 
-                let session_id = data
-                    .response
-                    .created_session_id
-                    .ok_or(AppError::message("No created session ID"))?;
+            let session_id = data
+                .response
+                .created_session_id
+                .ok_or(AppError::message("No created session ID"))?;
 
-                {
-                    let mut wl = self.session_id.write().unwrap();
-                    *wl = Some(session_id);
-                }
-
-                self.update_cookies(cookies, data.client.cookie_expires_at);
-                Ok(())
-            } else {
-                let err = self.get_error(res).await?;
-                Err(err)
+            {
+                let mut wl = self.session_id.write().await;
+                *wl = Some(session_id);
             }
-        })
+
+            self.update_cookies(cookies, data.client.cookie_expires_at)
+                .await;
+            Ok(())
+        } else {
+            let err = Self::get_error(res).await?;
+            Err(err)
+        }
     }
 
     pub async fn get_token(&self) -> Result<String, AppError> {
         let spec = {
-            let gt = self.token_spec.read().unwrap();
-            match &*gt {
-                Some(spec) => spec.clone(),
-                None => return Err(AppError::message("No token !")),
-            }
-        };
-
-        let current_secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .and_then(|v| Ok(v.as_secs()))
-            .unwrap_or(1);
-
-        if current_secs <= spec.exp {
-            return Ok(spec.token);
-        }
-
-        println!(
-            "Fetching token: current: {}, exp: {}",
-            current_secs, spec.exp
-        );
-        self.fetch_token().await?;
-
-        let spec = {
-            let gt = self.token_spec.read().unwrap();
+            let gt = self.token_spec.read().await;
             match &*gt {
                 Some(spec) => spec.clone(),
                 None => return Err(AppError::message("No token !")),
@@ -365,87 +327,84 @@ impl InnerAuth {
     }
 
     pub async fn fetch_token(&self) -> Result<(), AppError> {
-        self.rt.block_on(async move {
-            let sid = {
-                let rl = self.session_id.read().unwrap();
-                match &*rl {
-                    Some(sid) => sid.clone(),
-                    None => return Err(AppError::message("No session id")),
-                }
-            };
-
-            let mut wl = self.token_spec.write().unwrap();
-
-            let res = self
-                .client
-                .post(format!(
-                    "{CLERK_API_URL}/v1/client/sessions/{sid}/tokens{CLERK_QUERY_VERSION}"
-                ))
-                .header(COOKIE_HEADER, self.get_header_cookies())
-                .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
-                .form(&[("organization_id", "")])
-                .send()
-                .await
-                .map_err(AppError::err)?;
-
-            match res.status() {
-                status if status.is_success() => {
-                    let data: TokenPayload = res.json().await.map_err(AppError::err)?;
-                    *wl = Some(AuthToken::new(data.jwt)?);
-                    Ok(())
-                }
-                status => {
-                    if status.is_client_error() {
-                        let mut wl = self.session_id.write().unwrap();
-                        *wl = None;
-                    }
-                    let err = self.get_error(res).await?;
-                    Err(err)
-                }
+        println!("fetching token");
+        let sid = {
+            let rl = self.session_id.read().await;
+            match &*rl {
+                Some(sid) => sid.clone(),
+                None => return Err(AppError::message("No session id")),
             }
-        })
+        };
+
+        let mut wl = self.token_spec.write().await;
+
+        let res = self
+            .client
+            .post(format!(
+                "{CLERK_API_URL}/v1/client/sessions/{sid}/tokens{CLERK_QUERY_VERSION}"
+            ))
+            .header(COOKIE_HEADER, self.get_header_cookies().await)
+            .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
+            .form(&[("organization_id", "")])
+            .send()
+            .await
+            .map_err(AppError::err)?;
+
+        match res.status() {
+            status if status.is_success() => {
+                let data: TokenPayload = res.json().await.map_err(AppError::err)?;
+                *wl = Some(AuthToken::new(data.jwt)?);
+                Ok(())
+            }
+            status => {
+                if status.is_client_error() {
+                    let mut wl = self.session_id.write().await;
+                    *wl = None;
+                }
+                let err = Self::get_error(res).await?;
+                Err(err)
+            }
+        }
     }
 
     pub async fn sign_out(&self) -> Result<(), AppError> {
-        self.rt.block_on(async move {
-            let res = self
-                .client
-                .post(format!(
-                    "{CLERK_API_URL}/v1/client/sessions{CLERK_QUERY_VERSION}&_method=DELETE"
-                ))
-                .header(COOKIE_HEADER, self.get_header_cookies())
-                .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
-                .send()
-                .await
-                .map_err(AppError::err)?;
+        let res = self
+            .client
+            .post(format!(
+                "{CLERK_API_URL}/v1/client/sessions{CLERK_QUERY_VERSION}&_method=DELETE"
+            ))
+            .header(COOKIE_HEADER, self.get_header_cookies().await)
+            .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
+            .send()
+            .await
+            .map_err(AppError::err)?;
 
-            let cookies = extract_cookies(res.headers());
-            if res.status().is_client_error() {
-                let text = res.text().await.map_err(AppError::err)?;
-                return Err(AppError::message(format!(
-                    "Error deleting session: {}",
-                    text
-                )));
-            }
+        let res_cookies = extract_cookies(res.headers());
+        if res.status().is_client_error() {
+            let text = res.text().await.map_err(AppError::err)?;
+            return Err(AppError::message(format!(
+                "Error deleting session: {}",
+                text
+            )));
+        }
 
-            let _: ClientPayload = res.json().await.unwrap();
+        let _: ClientPayload = res.json().await.unwrap();
 
-            {
-                let mut wl = self.token_spec.write().unwrap();
-                *wl = None;
+        {
+            let mut wl = self.token_spec.write().await;
+            *wl = None;
 
-                let mut wl = self.cookies.write().unwrap();
-                *wl = cookies;
+            let mut wl = self.cookies.write().await;
+            *wl = res_cookies;
 
-                let mut wl = self.session_id.write().unwrap();
-                *wl = None;
-            }
+            let mut wl = self.session_id.write().await;
+            *wl = None;
+        }
 
-            Ok(())
-        })
+        Ok(())
     }
 
-    async fn get_error(&self, res: reqwest::Response) -> Result<AppError, AppError> {
+    async fn get_error(res: reqwest::Response) -> Result<AppError, AppError> {
         let status = res.status();
         let data: ClerkErrorPayload = res.json().await.map_err(AppError::err)?;
         Ok(AppError {
@@ -462,10 +421,10 @@ impl InnerAuth {
         })
     }
 
-    fn update_cookies(&self, cookies: HashMap<String, Cookie>, expires_at: u64) {
-        let mut wl = self.cookies.write().unwrap();
+    async fn update_cookies(&self, res_cookies: HashMap<String, Cookie>, expires_at: u64) {
+        let mut wl = self.cookies.write().await;
 
-        cookies.into_iter().for_each(|(k, v)| {
+        res_cookies.into_iter().for_each(|(k, v)| {
             wl.insert(
                 k,
                 Cookie {
@@ -476,8 +435,8 @@ impl InnerAuth {
         });
     }
 
-    fn get_header_cookies(&self) -> String {
-        let rl = self.cookies.read().unwrap();
+    async fn get_header_cookies(&self) -> String {
+        let rl = self.cookies.read().await;
         rl.iter().fold(String::from(""), |mut acc, (k, v)| {
             acc.push_str(k.as_str());
             acc.push_str("=");
@@ -488,11 +447,15 @@ impl InnerAuth {
     }
 
     pub fn save_data(&self, cx: &mut App) {
+        let cookies = self.cookies.blocking_read().clone();
+        let client_id = self.client_id.blocking_read().clone();
+        let session_id = self.session_id.blocking_read().clone();
+
         let store = Store::global_mut(cx);
-        store.cookies = self.cookies.read().unwrap().clone();
-        store.client_id = self.client_id.read().unwrap().clone();
-        store.session_id = self.session_id.read().unwrap().clone();
-        store.save();
+        store.cookies = cookies;
+        store.client_id = client_id;
+        store.session_id = session_id;
+        store.save()
     }
 }
 

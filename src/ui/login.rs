@@ -86,7 +86,7 @@ impl LoginUi {
                     Err(err) => {
                         window.push_notification(
                             Notification::error(format!("Failed to login: {}", err.message))
-                                .autohide(true),
+                                .autohide(false),
                             cx,
                         );
                     }
@@ -134,8 +134,10 @@ impl LoginUi {
                         });
                     }
                     Err(err) => {
-                        window
-                            .push_notification(Notification::error(err.message).autohide(true), cx);
+                        window.push_notification(
+                            Notification::error(err.message).autohide(false),
+                            cx,
+                        );
                     }
                 };
                 cx.notify();
