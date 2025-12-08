@@ -339,7 +339,7 @@ impl BrowseUi {
 impl Navigation for BrowseUi {
     fn id(&self) -> impl Into<String> {
         format!(
-            "{}-{}",
+            "{}:{}",
             self.current_nav.space_id, self.current_nav.folder_id
         )
     }

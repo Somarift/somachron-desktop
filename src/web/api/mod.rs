@@ -88,7 +88,6 @@ async fn handle_response<R: DeserializeOwned>(res: reqwest::Response) -> Result<
     }
 
     if res.status().is_success() {
-        println!("got response");
         res.json().await.map_err(AppError::err)
     } else {
         Err(AppError::from_res(res).await?)

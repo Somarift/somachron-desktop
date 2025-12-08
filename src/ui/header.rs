@@ -7,7 +7,7 @@ use gpui_component::{
 
 use crate::theme::*;
 
-const TITLE_BAR_LEFT_PADDING: Pixels = px(80.);
+const TITLE_BAR_LEFT_PADDING: Pixels = px(72.);
 
 pub struct HeaderUi;
 
@@ -42,7 +42,7 @@ impl Render for HeaderUi {
             .id("header-bar")
             .bg(cx.theme().title_bar)
             .pl(TITLE_BAR_LEFT_PADDING)
-            .border_1()
+            .border_color(cx.theme().title_bar_border)
             .border_b_1()
             .child(
                 div()

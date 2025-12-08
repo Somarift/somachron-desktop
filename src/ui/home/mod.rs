@@ -1,17 +1,20 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Side, WindowExt,
+    ActiveTheme, Icon, IconName, Side, StyledExt, WindowExt,
     avatar::Avatar,
+    button::Button,
     h_flex,
+    label::Label,
     notification::Notification,
     sidebar::{Sidebar, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
+    tooltip::Tooltip,
 };
 
 use crate::{
     auth::Auth,
     rt,
     ui::{
-        _components::{self, NavContext, NavStack, NavState, RenderBounds},
+        _components::{self, NavContext, NavStack, NavState, RenderBounds, loading_icon},
         home::browse::BrowseUi,
     },
     util::MapAsync,
@@ -111,7 +114,9 @@ impl HomeUi {
                     }
                     Err(err) => {
                         window.push_notification(
-                            Notification::error(err.message).autohide(false),
+                            Notification::error(err.message)
+                                .title("Failed to load spaces")
+                                .autohide(false),
                             cx,
                         );
                     }
@@ -144,15 +149,14 @@ impl Render for HomeUi {
             .flex()
             .size_full()
             .child(
-                div()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded_br_xl()
-                    .rounded_tr_xl()
-                    .child(self.render_sidebar(cx)),
+                div().border_1().border_color(cx.theme().border), // .child(self.render_sidebar(cx)),
             )
-            .when_some(self.nav_stack.read(cx).current(), |el, view| {
-                el.child(div().size_full().child(view.clone()))
+            .map(|el| {
+                let current = self.nav_stack.read(cx).current().cloned();
+                match current {
+                    Some(view) => el.child(div().size_full().child(view)),
+                    None => el.child(self.render_spaces(cx)),
+                }
             })
             .child({
                 let this = cx.entity();
@@ -171,6 +175,143 @@ impl Render for HomeUi {
 }
 
 impl HomeUi {
+    fn render_spaces(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        div().flex().flex_col().w_full().gap_2().p_4().map(|this| {
+            if self.loading_sidebar {
+                this.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .w_full()
+                        .items_center()
+                        .justify_center()
+                        .border_color(cx.theme().sidebar_border)
+                        .border_1()
+                        .border_dashed()
+                        .rounded_lg()
+                        .p_4()
+                        .gap_2()
+                        .child(loading_icon(|icon| icon.size_5())),
+                )
+            } else if self.user_spaces.is_empty() {
+                this.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .w_full()
+                        .items_center()
+                        .justify_center()
+                        .border_color(cx.theme().sidebar_border)
+                        .border_1()
+                        .border_dashed()
+                        .rounded_lg()
+                        .p_4()
+                        .gap_2()
+                        .child(
+                            div()
+                                .rounded_md()
+                                .p_2()
+                                .bg(cx.theme().muted)
+                                .child(Icon::new(IconName::GalleryVerticalEnd).size_5()),
+                        )
+                        .child(div().text_lg().child("Cloud storage empty"))
+                        .child(
+                            div().child(
+                                "Create your space and upload files to access them anywhere.",
+                            ),
+                        )
+                        .child(Button::new("create_new_space").label("Create space")),
+                )
+            } else {
+                this.child(Label::new("Spaces"))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_2()
+                            .children(self.user_spaces.iter().map(|m| {
+                                let space_name = m.space.name.clone();
+                                let space_description = if m.space.description.is_empty() {
+                                    String::from("No description")
+                                } else {
+                                    m.space.description.clone()
+                                };
+
+                                let space_id = m.space.id.clone();
+                                let folder_id = m.folder.clone();
+
+                                div()
+                                    .id(SharedString::new(m.space.id.clone()))
+                                    .flex()
+                                    .gap_4()
+                                    .border_1()
+                                    .rounded_md()
+                                    .items_center()
+                                    .p_4()
+                                    .bg(cx.theme().sidebar)
+                                    .w_56()
+                                    .child(Icon::new(IconName::GalleryVerticalEnd).size_4())
+                                    .tooltip(move |window, cx| {
+                                        let space_name = space_name.clone();
+                                        let space_description = space_description.clone();
+                                        Tooltip::element(move |_, cx| {
+                                            div().child(Label::new(space_name.clone())).child(
+                                                Label::new(space_description.clone())
+                                                    .text_color(cx.theme().muted_foreground),
+                                            )
+                                        })
+                                        .build(window, cx)
+                                    })
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .flex_wrap()
+                                            .truncate()
+                                            .text_ellipsis()
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .font_medium()
+                                                    .child(m.space.name.clone()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_wrap()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(if m.space.description.is_empty() {
+                                                        String::from("No description")
+                                                    } else {
+                                                        m.space.description.clone()
+                                                    }),
+                                            ),
+                                    )
+                                    .on_click(cx.listener(move |this, _ev, window, cx| {
+                                        this.nav_ctx.update(cx, |ctx, cx| {
+                                            ctx.clear_and_push(
+                                                BrowseUi::view(
+                                                    this.auth.clone(),
+                                                    this.nav_ctx.clone(),
+                                                    this.render_bounds.clone(),
+                                                    NavState::new(
+                                                        space_id.clone(),
+                                                        folder_id.clone(),
+                                                    ),
+                                                    window,
+                                                    cx,
+                                                ),
+                                                cx,
+                                            );
+                                        });
+                                    }))
+                            })),
+                    )
+            }
+        })
+    }
+
     fn render_sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         Sidebar::new(Side::Left)
             .border_width(0.)

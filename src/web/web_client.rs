@@ -98,21 +98,22 @@ impl gpui::http_client::HttpClient for WebClient {
         // }
 
         async move {
-            println!("requesting {} ...", parts.uri.to_string());
-            TOKIO_RUNTIME.block_on(async move {
-                let response = request.send().await?;
+            TOKIO_RUNTIME
+                .spawn(async move {
+                    let response = request.send().await?;
 
-                let headers = response.headers().clone();
-                let mut builder = http::Response::builder()
-                    .status(response.status().as_u16())
-                    .version(response.version());
-                *builder.headers_mut().unwrap() = headers;
+                    let headers = response.headers().clone();
+                    let mut builder = http::Response::builder()
+                        .status(response.status().as_u16())
+                        .version(response.version());
+                    *builder.headers_mut().unwrap() = headers;
 
-                let bytes = response.bytes().await?;
-                let body = gpui::http_client::AsyncBody::from_bytes(bytes);
+                    let bytes = response.bytes().await?;
+                    let body = gpui::http_client::AsyncBody::from_bytes(bytes);
 
-                builder.body(body).map_err(|e| anyhow!(e))
-            })
+                    builder.body(body).map_err(|e| anyhow!(e))
+                })
+                .await?
         }
         .boxed()
     }

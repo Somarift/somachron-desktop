@@ -189,8 +189,6 @@ impl Rooter {
                             cx,
                         );
                     });
-                } else {
-                    println!("Fetched token");
                 }
             }
         })

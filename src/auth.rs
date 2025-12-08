@@ -132,7 +132,6 @@ impl InnerAuth {
     }
 
     pub async fn setup_client(&self) -> Result<(), AppError> {
-        println!("Setting up client");
         {
             let rl = self.client_id.read().await;
             if let Some(_) = &*rl {
@@ -189,7 +188,6 @@ impl InnerAuth {
     }
 
     pub async fn sign_in(&self, email: &str) -> Result<String, AppError> {
-        println!("signing in");
         let res = self
             .client
             .post(format!(
@@ -231,7 +229,6 @@ impl InnerAuth {
     }
 
     pub async fn prepare_first_factor(&self, email_address_id: &str) -> Result<(), AppError> {
-        println!("prepare first factor");
         let sia = {
             let g_sia = self.sign_in_id.read().await;
             match &*g_sia {
@@ -269,7 +266,6 @@ impl InnerAuth {
     }
 
     pub async fn attempt_first_factor(&self, code: &str) -> Result<(), AppError> {
-        println!("attempt first factor");
         let sia = {
             let g_sia = self.sign_in_id.read().await;
             match &*g_sia {
@@ -327,7 +323,6 @@ impl InnerAuth {
     }
 
     pub async fn fetch_token(&self) -> Result<(), AppError> {
-        println!("fetching token");
         let sid = {
             let rl = self.session_id.read().await;
             match &*rl {
