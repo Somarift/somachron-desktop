@@ -7,13 +7,17 @@ use gpui_component::{
 };
 
 use crate::{
-    auth::{Auth, AuthEvent, SessionState},
+    auth::{Auth, AuthEvent, AuthState, SessionState},
+    ctx::UserState,
+    rt,
+    ui::_components::app_icon,
     util::MapAsync,
     web::api,
 };
 
 pub struct LoginUi {
-    auth: Entity<Auth>,
+    auth: AuthState,
+    user_state: UserState,
     email_input: Entity<InputState>,
     otp_input: Entity<OtpState>,
     loading: bool,
@@ -22,7 +26,12 @@ pub struct LoginUi {
 }
 
 impl LoginUi {
-    fn new(auth: Entity<Auth>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        auth: AuthState,
+        user_state: UserState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let email_input = cx.new(|cx| InputState::new(window, cx).placeholder("user@email.com"));
         let otp_input = cx.new(|cx| OtpState::new(6, window, cx));
 
@@ -39,6 +48,7 @@ impl LoginUi {
 
         Self {
             auth,
+            user_state,
             email_input,
             otp_input,
             loading: false,
@@ -47,34 +57,35 @@ impl LoginUi {
         }
     }
 
-    pub fn view(auth: Entity<Auth>, window: &mut Window, cx: &mut App) -> Entity<Self> {
-        cx.new(|cx| Self::new(auth, window, cx))
+    pub fn view(
+        auth: AuthState,
+        user_state: UserState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<Self> {
+        cx.new(|cx| Self::new(auth, user_state, window, cx))
     }
 
     fn sign_in(&self, window: &mut Window, cx: &mut Context<Self>) {
         let email = self.email_input.read(cx).value();
+
+        let inner = self.auth.read(cx).inner();
+        let sign_in_task = rt::spawn(cx, async move {
+            inner
+                .sign_in(&email)
+                .await
+                .map_async(async move |idn| inner.prepare_first_factor(&idn).await)
+                .await
+        });
+
         cx.spawn_in(window, async move |this, cx| {
-            let inner = this
-                .update(cx, |this, cx| {
-                    this.loading = true;
-                    cx.notify();
+            this.update(cx, |this, cx| {
+                this.loading = true;
+                cx.notify();
+            })
+            .unwrap();
 
-                    this.auth.read(cx).inner()
-                })
-                .unwrap();
-
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    inner
-                        .sign_in(&email)
-                        .await
-                        .map_async(async move |idn| {
-                            inner.prepare_first_factor(&idn).await.map(|_| inner)
-                        })
-                        .await
-                })
-                .await;
+            let result = sign_in_task.await.flatten();
 
             this.update_in(cx, |this, window, cx| {
                 this.loading = false;
@@ -85,7 +96,8 @@ impl LoginUi {
                     }
                     Err(err) => {
                         window.push_notification(
-                            Notification::error(format!("Failed to login: {}", err.message))
+                            Notification::error(err.message)
+                                .title("Failed to login")
                                 .autohide(false),
                             cx,
                         );
@@ -107,21 +119,17 @@ impl LoginUi {
         let code = code.clone();
         self.loading = true;
 
-        cx.spawn_in(window, async move |this, cx| {
-            let inner = this
-                .read_with(cx, |this, cx| this.auth.read(cx).inner())
-                .unwrap();
+        let inner = self.auth.read(cx).inner();
+        let otp_task = rt::spawn(cx, async move {
+            inner
+                .attempt_first_factor(&code)
+                .await
+                .map_async(async move |_| inner.fetch_token().await)
+                .await
+        });
 
-            let result = cx
-                .background_executor()
-                .spawn(async move {
-                    inner
-                        .attempt_first_factor(&code)
-                        .await
-                        .map_async(async move |_| inner.fetch_token().await)
-                        .await
-                })
-                .await;
+        cx.spawn_in(window, async move |this, cx| {
+            let result = otp_task.await.flatten();
 
             this.update_in(cx, |this, window, cx| {
                 this.loading = false;
@@ -135,7 +143,9 @@ impl LoginUi {
                     }
                     Err(err) => {
                         window.push_notification(
-                            Notification::error(err.message).autohide(false),
+                            Notification::error(err.message)
+                                .title("OTP verification failed")
+                                .autohide(false),
                             cx,
                         );
                     }
@@ -177,21 +187,7 @@ impl Render for LoginUi {
                     div()
                         .flex()
                         .gap_2()
-                        .child(
-                            div()
-                                .flex()
-                                .justify_center()
-                                .items_center()
-                                .bg(cx.theme().primary)
-                                .rounded_md()
-                                .size_6()
-                                .child(
-                                    Icon::new(Icon::empty())
-                                        .text_color(cx.theme().primary_foreground)
-                                        .size_5()
-                                        .path("icons/cloud-moon.svg"),
-                                ),
-                        )
+                        .child(app_icon::comp(cx, |icon| icon.size_5()))
                         .child(div().font_medium().child("Somachron")),
                 )
                 .child(

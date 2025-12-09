@@ -2,7 +2,7 @@ use std::{any::type_name, pin::Pin, sync::LazyLock, task::Poll};
 
 use anyhow::anyhow;
 use bytes::{BufMut, BytesMut};
-use futures::FutureExt;
+use futures::{FutureExt, TryStreamExt};
 use gpui::http_client::http;
 use reqwest::header::HeaderValue;
 
@@ -108,8 +108,11 @@ impl gpui::http_client::HttpClient for WebClient {
                         .version(response.version());
                     *builder.headers_mut().unwrap() = headers;
 
-                    let bytes = response.bytes().await?;
-                    let body = gpui::http_client::AsyncBody::from_bytes(bytes);
+                    let bytes = response
+                        .bytes_stream()
+                        .map_err(futures::io::Error::other)
+                        .into_async_read();
+                    let body = gpui::http_client::AsyncBody::from_reader(bytes);
 
                     builder.body(body).map_err(|e| anyhow!(e))
                 })

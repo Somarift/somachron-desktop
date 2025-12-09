@@ -5,13 +5,14 @@ use gpui_component::{
     ActiveTheme, Icon, IconName, StyledExt, WindowExt, notification::Notification,
     scroll::ScrollbarAxis,
 };
+use uuid::Uuid;
 
 use crate::{
-    auth::Auth,
+    auth::AuthState,
+    ctx::UserState,
+    nav::{NavEvent, NavId, NavState, Navigation},
     rt,
-    ui::_components::{
-        self, MEDIA_HEIGHT, NavContext, NavStack, NavState, Navigation, RenderBounds, loading_icon,
-    },
+    ui::_components::{self, MEDIA_HEIGHT, RenderBounds, loading_icon},
     util::MapAsync,
     web::api::{
         self,
@@ -28,8 +29,9 @@ enum MediaState {
 }
 
 pub struct BrowseUi {
-    auth: Entity<Auth>,
-    nav_ctx: NavContext<NavStack>,
+    auth: AuthState,
+    user_state: UserState,
+    nav: Navigation,
     render_bounds: Entity<RenderBounds>,
     image_cache: Entity<RetainAllImageCache>,
 
@@ -50,14 +52,16 @@ pub struct BrowseUi {
 
 impl BrowseUi {
     fn new(
-        auth: Entity<Auth>,
-        nav_ctx: NavContext<NavStack>,
-        render_bounds: Entity<RenderBounds>,
+        auth: AuthState,
+        user_state: UserState,
+        nav: Navigation,
         current_nav: NavState,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let image_cache = RetainAllImageCache::new(cx);
+
+        let render_bounds = cx.new(|_cx| RenderBounds::new());
 
         let size_sub = cx.subscribe_in(
             &render_bounds,
@@ -69,21 +73,17 @@ impl BrowseUi {
             },
         );
 
-        // let nav_sub = cx.subscribe_in(&nav_ctx, window, |this, _entity, event, window, cx| {
-        //     this.reset_state();
-
-        //     this.nav_stack.update(cx, |stack, cx| {
-        //         stack.on_event(event);
-        //         this.current_nav = stack.top();
-        //         cx.notify();
-        //     });
-
-        //     this.fetch_fs(window, cx);
-        // });
+        let nav_sub = cx.subscribe_in(&nav, window, |this, _entity, event, window, cx| {
+            if let NavEvent::Refresh = event {
+                this.reset_state();
+                this.fetch_fs(window, cx);
+            }
+        });
 
         Self {
             auth,
-            nav_ctx,
+            user_state,
+            nav,
             render_bounds,
             image_cache,
             current_nav,
@@ -96,23 +96,33 @@ impl BrowseUi {
             scroll_offset: px(0.),
             scroll_handle: ScrollHandle::new(),
             loading: false,
-            _subscriptions: vec![size_sub],
+            _subscriptions: vec![size_sub, nav_sub],
         }
     }
 
     pub fn view(
-        auth: Entity<Auth>,
-        nav_ctx: NavContext<NavStack>,
-        render_bounds: Entity<RenderBounds>,
+        auth: AuthState,
+        user_state: UserState,
+        nav: Navigation,
         current_nav: NavState,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
         cx.new(|cx| {
-            let mut entity = Self::new(auth, nav_ctx, render_bounds, current_nav, window, cx);
+            let mut entity = Self::new(auth, user_state, nav, current_nav, window, cx);
             entity.fetch_fs(window, cx);
             entity
         })
+    }
+
+    fn reset_state(&mut self) {
+        self.folders.clear();
+        self.files.clear();
+        self.media_states.clear();
+        self.item_rows.clear();
+        self.visible_rows = 0;
+        self.visible_item_range = 0..0;
+        self.scroll_offset = px(0.);
     }
 
     fn compute_visible_grid(this: &mut Self, cx: &mut Context<Self>) {
@@ -276,7 +286,7 @@ impl BrowseUi {
         window: &mut Window,
         cx: &mut Context<Self>,
         index: usize,
-        file_id: String,
+        file_id: Uuid,
     ) {
         let nav_state = this.current_nav.clone();
 
@@ -336,12 +346,9 @@ impl BrowseUi {
     }
 }
 
-impl Navigation for BrowseUi {
-    fn id(&self) -> impl Into<String> {
-        format!(
-            "{}:{}",
-            self.current_nav.space_id, self.current_nav.folder_id
-        )
+impl NavId for BrowseUi {
+    fn id(&self) -> NavState {
+        self.current_nav.clone()
     }
 }
 
@@ -355,8 +362,8 @@ impl Render for BrowseUi {
             .when(self.loading, |el| {
                 el.child(_components::loading_icon(|icon| icon.size_5()))
             })
-            .child(self.current_nav.space_id.clone())
-            .child(self.current_nav.folder_id.clone())
+            .child(self.current_nav.space_id.to_string())
+            .child(self.current_nav.folder_id.to_string())
             .child(self.render_folder_cards(cx))
             .child(self.render_file_list(window, cx))
             .child({
@@ -397,21 +404,22 @@ impl BrowseUi {
             .children(self.folders.iter().cloned().map(|folder| {
                 div()
                     .flex_auto()
-                    .id(SharedString::new(folder.id.clone()))
+                    .id(SharedString::new(folder.id.to_string()))
                     .on_click(cx.listener(move |this, _ev, window, cx| {
-                        let folder_id = folder.id.as_str();
-                        this.nav_ctx.update(cx, |stack, cx| {
+                        let folder_id = &folder.id;
+                        this.nav.update(cx, |stack, cx| {
                             stack.push(
                                 BrowseUi::view(
                                     this.auth.clone(),
-                                    this.nav_ctx.clone(),
-                                    this.render_bounds.clone(),
-                                    NavState::new(this.current_nav.space_id.as_str(), folder_id),
+                                    this.user_state.clone(),
+                                    this.nav.clone(),
+                                    NavState::new(this.current_nav.space_id, folder_id.clone()),
                                     window,
                                     cx,
                                 ),
                                 cx,
                             );
+                            cx.notify();
                         });
                     }))
                     .border_1()
@@ -447,7 +455,7 @@ impl BrowseUi {
                         .w(px(file.width as f32))
                         .rounded_md()
                         .relative()
-                        .group(SharedString::new(file.id.as_str()))
+                        .group(SharedString::new(file.id.to_string()))
                         .flex_shrink_0()
                         .map(|this| {
                             if let Some(MediaState::Loaded(urls)) =
@@ -494,7 +502,7 @@ impl BrowseUi {
                                 .px_2()
                                 .py_1()
                                 .opacity(0.)
-                                .group_hover(SharedString::new(file.id.as_str()), |el| {
+                                .group_hover(SharedString::new(file.id.to_string()), |el| {
                                     el.opacity(100.)
                                 })
                                 .truncate()

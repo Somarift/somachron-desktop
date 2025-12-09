@@ -40,6 +40,8 @@ pub enum AuthEvent {
     Session(SessionState),
 }
 
+pub type AuthState = Entity<Auth>;
+
 pub struct Auth {
     _inner: Arc<InnerAuth>,
 }

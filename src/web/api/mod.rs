@@ -1,6 +1,7 @@
 use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use uuid::Uuid;
 
 use crate::err::AppError;
 
@@ -27,13 +28,16 @@ pub struct EmptyResponse {
 async fn get<R: DeserializeOwned + Send + 'static>(
     api: impl Into<String> + Send + 'static,
     token: &str,
-    space_id: Option<&str>,
+    space_id: Option<&Uuid>,
 ) -> Result<R, AppError> {
     let res = API_CLIENT
         .get(format!("{API_URL}{}", api.into()))
         .bearer_auth(token)
         .header("Content-Type", "application/json")
-        .header(SPACE_ID_HEADER, space_id.unwrap_or_default())
+        .header(
+            SPACE_ID_HEADER,
+            space_id.map(|s| s.to_string()).unwrap_or_default(),
+        )
         .send()
         .await
         .map_err(AppError::err)?;
@@ -44,14 +48,17 @@ async fn get<R: DeserializeOwned + Send + 'static>(
 async fn post<R: DeserializeOwned + Send + 'static, B: Serialize + Send + 'static>(
     api: impl Into<String> + Send + 'static,
     token: &str,
-    space_id: Option<&str>,
+    space_id: Option<&Uuid>,
     body: B,
 ) -> Result<R, AppError> {
     let res = API_CLIENT
         .post(format!("{API_URL}{}", api.into()))
         .bearer_auth(token)
         .header("Content-Type", "application/json")
-        .header(SPACE_ID_HEADER, space_id.unwrap_or_default())
+        .header(
+            SPACE_ID_HEADER,
+            space_id.map(|s| s.to_string()).unwrap_or_default(),
+        )
         .json(&body)
         .send()
         .await
@@ -63,13 +70,16 @@ async fn post<R: DeserializeOwned + Send + 'static, B: Serialize + Send + 'stati
 async fn delete<R: DeserializeOwned + Send + 'static>(
     api: impl Into<String> + Send + 'static,
     token: &str,
-    space_id: Option<&str>,
+    space_id: Option<&Uuid>,
 ) -> Result<R, AppError> {
     let res = API_CLIENT
         .delete(format!("{API_URL}{}", api.into()))
         .bearer_auth(token)
         .header("Content-Type", "application/json")
-        .header(SPACE_ID_HEADER, space_id.unwrap_or_default())
+        .header(
+            SPACE_ID_HEADER,
+            space_id.map(|s| s.to_string()).unwrap_or_default(),
+        )
         .send()
         .await
         .map_err(AppError::err)?;

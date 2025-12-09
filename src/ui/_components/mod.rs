@@ -1,8 +1,9 @@
 use gpui::*;
 use gpui_component::{Icon, IconName};
 
-pub mod nav;
-pub use nav::*;
+pub mod app_icon;
+pub mod create_space_dialog;
+pub mod select_space_dialog;
 
 pub const MEDIA_HEIGHT: Pixels = px(176.);
 
@@ -17,6 +18,7 @@ pub fn loading_icon(f: impl FnOnce(Icon) -> Icon) -> impl IntoElement {
 #[derive(Debug)]
 pub struct SizeEvent;
 
+#[derive(Debug)]
 pub struct RenderBounds {
     pub height: Pixels,
     pub width: Pixels,

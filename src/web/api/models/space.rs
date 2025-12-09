@@ -10,14 +10,12 @@ pub enum SpaceRole {
 }
 
 pub mod res {
-    use chrono::{DateTime, Utc};
     use serde::Deserialize;
+    use uuid::Uuid;
 
     #[derive(Debug, Deserialize, Clone)]
     pub struct SpaceResponse {
-        pub id: String,
-        pub created_at: DateTime<Utc>,
-        pub updated_at: DateTime<Utc>,
+        pub id: Uuid,
 
         pub name: String,
         pub description: String,
@@ -26,12 +24,20 @@ pub mod res {
 
     #[derive(Debug, Deserialize, Clone)]
     pub struct UserSpaceResponse {
-        pub id: String,
-        pub created_at: DateTime<Utc>,
-        pub updated_at: DateTime<Utc>,
+        pub id: Uuid,
 
         pub role: super::SpaceRole,
         pub space: SpaceResponse,
-        pub folder: String,
+        pub folder: Uuid,
+    }
+}
+
+pub mod req {
+    use serde::Serialize;
+
+    #[derive(Debug, Serialize)]
+    pub struct CreateSpaceRequest {
+        pub name: String,
+        pub description: String,
     }
 }

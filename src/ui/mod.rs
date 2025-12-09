@@ -3,7 +3,9 @@ use gpui_component::{ActiveTheme, Root, WindowExt, notification::Notification};
 use header::HeaderUi;
 
 use crate::{
-    auth::{Auth, AuthClientEvent, AuthEvent, SessionState},
+    auth::{Auth, AuthClientEvent, AuthEvent, AuthState, SessionState},
+    ctx::{UserData, UserState},
+    nav::NavStack,
     rt,
     ui::{home::HomeUi, login::LoginUi},
 };
@@ -20,8 +22,9 @@ pub struct Rooter {
     login_ui: Entity<LoginUi>,
     home_ui: Entity<HomeUi>,
 
-    auth: Entity<Auth>,
+    auth: AuthState,
     auth_loading: bool,
+    user_state: UserState,
     session_state: Option<SessionState>,
     _subscriptions: Vec<Subscription>,
 }
@@ -29,10 +32,12 @@ pub struct Rooter {
 impl Rooter {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let auth = cx.new(|cx| Auth::init(cx));
+        let user_state = cx.new(|_| UserData::new());
+        let nav = cx.new(|_| NavStack::new());
 
-        let header_ui = HeaderUi::view(cx);
-        let login_ui = LoginUi::view(auth.clone(), window, cx);
-        let home_ui = HomeUi::view(auth.clone(), window, cx);
+        let header_ui = HeaderUi::view(auth.clone(), user_state.clone(), nav.clone(), window, cx);
+        let login_ui = LoginUi::view(auth.clone(), user_state.clone(), window, cx);
+        let home_ui = HomeUi::view(auth.clone(), user_state.clone(), nav.clone(), window, cx);
 
         let win_auth = auth.clone();
         cx.on_window_closed(move |cx| {
@@ -86,6 +91,7 @@ impl Rooter {
             login_ui,
             home_ui,
             auth,
+            user_state,
             auth_loading: false,
             session_state: None,
             _subscriptions: vec![auth_sub],
@@ -199,6 +205,7 @@ impl Rooter {
 impl Render for Rooter {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let notification_layer = Root::render_notification_layer(window, cx);
+        let dialog_layer = Root::render_dialog_layer(window, cx);
 
         div()
             .on_action(|_: &CloseWindow, win, _| {
@@ -247,8 +254,7 @@ impl Render for Rooter {
                     ),
                 })
             })
-            .when(notification_layer.is_some(), |d| {
-                d.child(notification_layer.unwrap())
-            })
+            .when_some(notification_layer, |d, layer| d.child(layer))
+            .when_some(dialog_layer, |d, layer| d.child(layer))
     }
 }
