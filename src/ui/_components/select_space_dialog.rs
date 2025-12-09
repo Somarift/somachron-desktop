@@ -1,7 +1,11 @@
 use gpui::*;
 use gpui_component::{
-    ActiveTheme, Icon, IconName, StyledExt, WindowExt, button::Button, dialog::Dialog,
-    input::InputState, scroll::ScrollbarAxis, v_flex,
+    ActiveTheme, Icon, IconName, StyledExt, WindowExt,
+    button::Button,
+    dialog::Dialog,
+    input::InputState,
+    scroll::{ScrollableElement, ScrollbarAxis},
+    v_flex,
 };
 
 use crate::{
@@ -32,7 +36,8 @@ pub fn comp<T: create_space_dialog::CreateSpaceDialog + 'static>(
         })
         .child(
             div()
-                .scrollable(ScrollbarAxis::Vertical)
+                .id("select_space_dialog_child")
+                .overflow_y_scroll()
                 .flex()
                 .flex_col()
                 .gap_2()

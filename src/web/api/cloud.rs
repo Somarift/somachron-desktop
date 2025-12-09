@@ -23,6 +23,14 @@ pub async fn list_files(
     super::get(format!("/media/ls/{folder_id}"), token, Some(space_id)).await
 }
 
+pub async fn get_folder(
+    token: &str,
+    space_id: &Uuid,
+    folder_id: &Uuid,
+) -> Result<FolderResponse, AppError> {
+    super::get(format!("/media/d/{folder_id}"), token, Some(space_id)).await
+}
+
 pub async fn get_stream_urls(
     token: &str,
     space_id: &Uuid,

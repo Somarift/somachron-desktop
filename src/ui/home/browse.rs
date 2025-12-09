@@ -2,8 +2,13 @@ use std::ops::Range;
 
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, StyledExt, WindowExt, notification::Notification,
-    scroll::ScrollbarAxis,
+    ActiveTheme, Icon, IconName, Side, Sizable, StyledExt, WindowExt,
+    button::{Button, ButtonVariants},
+    h_flex,
+    notification::Notification,
+    scroll::{ScrollableElement, ScrollbarAxis},
+    sidebar::{Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
+    v_flex,
 };
 use uuid::Uuid;
 
@@ -36,6 +41,7 @@ pub struct BrowseUi {
     image_cache: Entity<RetainAllImageCache>,
 
     current_nav: NavState,
+    folder: Option<FolderResponse>,
     folders: Vec<FolderResponse>,
     files: Vec<FileMetaReponse>,
     media_states: Vec<MediaState>,
@@ -44,7 +50,8 @@ pub struct BrowseUi {
     visible_rows: usize,
     visible_item_range: Range<usize>,
     scroll_offset: Pixels,
-    scroll_handle: ScrollHandle,
+    files_scroll_handle: ScrollHandle,
+    header_scroll_handle: ScrollHandle,
 
     loading: bool,
     _subscriptions: Vec<Subscription>,
@@ -68,7 +75,7 @@ impl BrowseUi {
             window,
             |this, _entity, _event, _window, cx| {
                 Self::compute_visible_grid(this, cx);
-                this.scroll_offset = px(0.);
+                this.scroll_offset = px(-1.);
                 Self::update_visible_state(this, cx);
             },
         );
@@ -87,14 +94,16 @@ impl BrowseUi {
             render_bounds,
             image_cache,
             current_nav,
+            folder: None,
             folders: Vec::new(),
             files: Vec::new(),
             media_states: Vec::new(),
             item_rows: Vec::new(),
             visible_rows: 0,
             visible_item_range: 0..0,
-            scroll_offset: px(0.),
-            scroll_handle: ScrollHandle::new(),
+            scroll_offset: px(-1.),
+            files_scroll_handle: ScrollHandle::new(),
+            header_scroll_handle: ScrollHandle::new(),
             loading: false,
             _subscriptions: vec![size_sub, nav_sub],
         }
@@ -122,7 +131,7 @@ impl BrowseUi {
         self.item_rows.clear();
         self.visible_rows = 0;
         self.visible_item_range = 0..0;
-        self.scroll_offset = px(0.);
+        self.scroll_offset = px(-1.);
     }
 
     fn compute_visible_grid(this: &mut Self, cx: &mut Context<Self>) {
@@ -171,7 +180,7 @@ impl BrowseUi {
     }
 
     fn update_visible_state(this: &mut Self, cx: &mut Context<Self>) {
-        let offset = this.scroll_handle.bounds().origin.y;
+        let offset = this.files_scroll_handle.offset().y;
         if this.scroll_offset == offset {
             return;
         }
@@ -228,12 +237,28 @@ impl BrowseUi {
                 .await
         });
 
+        let _inner = inner.clone();
         let files = rt::spawn(cx, async move {
-            inner
+            _inner
                 .get_token()
                 .await
                 .map_async(async move |token| {
                     api::cloud::list_files(
+                        &token,
+                        &state.space_id.clone(),
+                        &state.folder_id.clone(),
+                    )
+                    .await
+                })
+                .await
+        });
+
+        let folder = rt::spawn(cx, async move {
+            inner
+                .get_token()
+                .await
+                .map_async(async move |token| {
+                    api::cloud::get_folder(
                         &token,
                         &state.space_id.clone(),
                         &state.folder_id.clone(),
@@ -250,6 +275,7 @@ impl BrowseUi {
             });
 
             let folders = folders.await.flatten();
+            let folder = folder.await.flatten();
             let files = files.await.flatten();
 
             let _ = this.update_in(cx, |this, window, cx| {
@@ -258,8 +284,12 @@ impl BrowseUi {
                     Ok(folders) => {
                         this.folders = folders;
                     }
-                    Err(err) => window
-                        .push_notification(Notification::error(err.message).autohide(false), cx),
+                    Err(err) => window.push_notification(
+                        Notification::error(err.message)
+                            .title("Failed to fetch folders")
+                            .autohide(false),
+                        cx,
+                    ),
                 };
 
                 match files {
@@ -268,10 +298,24 @@ impl BrowseUi {
                         this.media_states = this.files.iter().map(|_| MediaState::Idle).collect();
                         Self::compute_visible_grid(this, cx);
 
-                        this.scroll_offset = px(0.); // invalidate
+                        this.scroll_offset = px(-1.); // invalidate
                     }
-                    Err(err) => window
-                        .push_notification(Notification::error(err.message).autohide(false), cx),
+                    Err(err) => window.push_notification(
+                        Notification::error(err.message)
+                            .title("Failed to get files")
+                            .autohide(false),
+                        cx,
+                    ),
+                };
+
+                match folder {
+                    Ok(folder) => this.folder = Some(folder),
+                    Err(err) => window.push_notification(
+                        Notification::error(err.message)
+                            .title("Failed to get current folder")
+                            .autohide(false),
+                        cx,
+                    ),
                 };
 
                 Self::update_visible_state(this, cx);
@@ -355,46 +399,196 @@ impl NavId for BrowseUi {
 impl Render for BrowseUi {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .id("browse_ui")
+            .flex()
             .size_full()
-            .scrollable(ScrollbarAxis::Vertical)
-            .p_4()
-            .when(self.loading, |el| {
-                el.child(_components::loading_icon(|icon| icon.size_5()))
-            })
-            .child(self.current_nav.space_id.to_string())
-            .child(self.current_nav.folder_id.to_string())
-            .child(self.render_folder_cards(cx))
-            .child(self.render_file_list(window, cx))
+            .child(self.render_sidebar(cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .size_full()
+                    .child(
+                        deferred(
+                            div()
+                                .absolute()
+                                .bottom_0()
+                                .flex()
+                                .flex_shrink_0()
+                                .items_center()
+                                .bg(cx.theme().sidebar)
+                                .border_t_1()
+                                .border_color(cx.theme().sidebar_border)
+                                .px_2()
+                                .py_1p5()
+                                .w_full()
+                                .justify_between()
+                                .child(
+                                    h_flex()
+                                        .id("browse_header")
+                                        .w_56()
+                                        .overflow_x_scroll()
+                                        .track_scroll(&self.header_scroll_handle)
+                                        .text_sm()
+                                        .map(|this| {
+                                            if self.loading {
+                                                this.child(loading_icon(|icon| icon.size_4()))
+                                            } else if let Some(folder) = self.folder.as_ref() {
+                                                this.child(folder.path.replace("/", " / "))
+                                            } else {
+                                                this.child("...")
+                                            }
+                                        }),
+                                )
+                                .child(
+                                    h_flex()
+                                        .gap_2()
+                                        .child(
+                                            Button::new("members")
+                                                .icon(Icon::empty().path("icons/users.svg"))
+                                                .small()
+                                                .ghost()
+                                                .border_1()
+                                                .border_color(cx.theme().sidebar_border),
+                                        )
+                                        .child(
+                                            Button::new("upload")
+                                                .primary()
+                                                .icon(Icon::empty().path("icons/upload.svg"))
+                                                .label("Upload")
+                                                .small(),
+                                        ),
+                                )
+                                .horizontal_scrollbar(&self.header_scroll_handle),
+                        )
+                        .with_priority(999),
+                    )
+                    // .child(self.render_folder_cards(cx))
+                    .child(
+                        div()
+                            .id("browse_ui")
+                            .size_full()
+                            .overflow_y_scroll()
+                            .child(
+                                div()
+                                    .id("files_scroll")
+                                    .size_full()
+                                    .overflow_y_scroll()
+                                    .p_2()
+                                    .child(self.render_file_list(window, cx))
+                                    .child({
+                                        let this = cx.entity();
+                                        canvas(
+                                            move |_b, _w, _c| {},
+                                            move |_b, _d, _w, cx| {
+                                                this.update(cx, |this, cx| {
+                                                    let size =
+                                                        this.files_scroll_handle.bounds().size;
+                                                    let emitted = this.render_bounds.update(
+                                                        cx,
+                                                        |bounds, cx| {
+                                                            bounds
+                                                                .w_event(size.width)
+                                                                .map(|ev| {
+                                                                    cx.emit(ev);
+                                                                    true
+                                                                })
+                                                                .unwrap_or(false)
+                                                        },
+                                                    );
+                                                    if !emitted {
+                                                        Self::update_visible_state(this, cx);
+                                                    }
+                                                });
+                                            },
+                                        )
+                                    })
+                                    .track_scroll(&self.files_scroll_handle),
+                            )
+                            .vertical_scrollbar(&self.files_scroll_handle),
+                    ),
+            )
             .child({
                 let this = cx.entity();
                 canvas(
-                    move |_b, _w, _c| {},
-                    move |_b, _d, _w, cx| {
+                    move |_, _, _| {},
+                    move |el_bounds, _d, _w, cx| {
                         this.update(cx, |this, cx| {
-                            let size = this.scroll_handle.bounds().size;
-                            let emitted = this.render_bounds.update(cx, |bounds, cx| {
-                                bounds
-                                    .w_event(size.width)
-                                    .map(|ev| {
-                                        cx.emit(ev);
-                                        true
-                                    })
-                                    .unwrap_or(false)
-                            });
-                            if !emitted {
-                                Self::update_visible_state(this, cx);
-                            }
+                            this.render_bounds.update(cx, |bounds, cx| {
+                                bounds.h_event(el_bounds.size.height).map(|ev| cx.emit(ev));
+                            })
                         });
                     },
                 )
             })
-            .track_scroll(&self.scroll_handle)
     }
 }
 
 /// UI functions
 impl BrowseUi {
+    fn render_sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        Sidebar::new(Side::Left)
+            // .border_width(0.)
+            .header(
+                SidebarHeader::new().child(
+                    h_flex()
+                        .gap_2()
+                        .child(Icon::new(IconName::GalleryVerticalEnd))
+                        .child(format!("{} items", self.folders.len() + self.files.len())),
+                ),
+            )
+            .child(
+                SidebarGroup::new("Folders").child(SidebarMenu::new().when_else(
+                    self.loading,
+                    |el| {
+                        el.child(
+                            SidebarMenuItem::new("Loading")
+                                .active(false)
+                                .suffix(_components::loading_icon(|icon| icon.size_4())),
+                        )
+                    },
+                    |el| {
+                        el.when_else(
+                            self.folders.is_empty(),
+                            |el| el.child(SidebarMenuItem::new("No folders")),
+                            |el| {
+                                el.children(self.folders.iter().map(|folder| {
+                                    let folder_id = folder.id.clone();
+
+                                    SidebarMenuItem::new(&folder.name)
+                                        .icon(Icon::new(IconName::Folder))
+                                        .on_click(cx.listener(move |this, _ev, window, cx| {
+                                            this.nav.update(cx, |stack, cx| {
+                                                stack.push(
+                                                    BrowseUi::view(
+                                                        this.auth.clone(),
+                                                        this.user_state.clone(),
+                                                        this.nav.clone(),
+                                                        this.current_nav
+                                                            .clone()
+                                                            .with_folder(folder_id),
+                                                        window,
+                                                        cx,
+                                                    ),
+                                                    cx,
+                                                );
+                                            });
+                                        }))
+                                }))
+                            },
+                        )
+                    },
+                )),
+            )
+            .footer(
+                Button::new("create_folder")
+                    .primary()
+                    .w_full()
+                    .icon(Icon::empty().path("icons/folder-plus.svg"))
+                    .label("Create folder")
+                    .small(),
+            )
+    }
+
     fn render_folder_cards(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
@@ -443,11 +637,8 @@ impl BrowseUi {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_2()
-            .children(self.files.iter().cloned().enumerate().map(|(i, file)| {
+        div().flex().flex_wrap().gap_2().pb_12().children(
+            self.files.iter().cloned().enumerate().map(|(i, file)| {
                 let this = cx.entity();
                 if self.visible_item_range.contains(&i) {
                     div()
@@ -522,6 +713,7 @@ impl BrowseUi {
                         .bg(cx.theme().sidebar)
                         .child(file.file_name)
                 }
-            }))
+            }),
+        )
     }
 }

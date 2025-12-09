@@ -270,6 +270,9 @@ impl Render for HeaderUi {
             .on_click(cx.listener(Self::change_mode));
 
         TitleBar::new()
+            .absolute()
+            .top_0()
+            .w_full()
             .child(self.render_nav_buttons(cx))
             .child(self.render_space_switcher(cx))
             .child(

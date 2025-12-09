@@ -4,11 +4,11 @@ use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
 #[folder = "./assets"]
-#[include = "icons/**/*"]
+#[include = "icons/**/*.svg"]
 #[exclude = "*.DS_Store"]
-pub struct Assets;
+pub struct AppAssets;
 
-impl AssetSource for Assets {
+impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
         Self::get(path)
             .map(|f| Some(f.data))

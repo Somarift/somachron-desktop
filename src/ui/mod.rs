@@ -1,5 +1,5 @@
 use gpui::{prelude::FluentBuilder, *};
-use gpui_component::{ActiveTheme, Root, WindowExt, notification::Notification};
+use gpui_component::{ActiveTheme, Root, WindowExt, notification::Notification, v_flex};
 use header::HeaderUi;
 
 use crate::{
@@ -211,10 +211,8 @@ impl Render for Rooter {
             .on_action(|_: &CloseWindow, win, _| {
                 win.remove_window();
             })
-            .flex()
-            .flex_col()
             .size_full()
-            .child(self.header_ui.clone())
+            .child(deferred(self.header_ui.clone()).with_priority(899))
             .when(self.auth_loading, |d| {
                 d.child(
                     div().size_full().flex().child(

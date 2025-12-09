@@ -36,7 +36,7 @@ fn get_window_options(cx: &mut App) -> WindowOptions {
 
 fn main() {
     Application::new()
-        .with_assets(assets::Assets)
+        .with_assets(assets::AppAssets)
         .with_http_client(Arc::new(web::WebClient::new()))
         .run(|cx: &mut App| {
             let window_options = get_window_options(cx);

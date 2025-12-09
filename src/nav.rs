@@ -20,6 +20,11 @@ impl NavState {
             folder_id,
         }
     }
+
+    pub fn with_folder(mut self, folder_id: Uuid) -> Self {
+        self.folder_id = folder_id;
+        self
+    }
 }
 
 pub type Navigation = Entity<NavStack>;

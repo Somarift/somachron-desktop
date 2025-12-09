@@ -19,6 +19,7 @@ pub mod res {
         pub updated_at: DateTime<Utc>,
 
         pub name: String,
+        pub path: String,
     }
 
     #[derive(Debug, Deserialize, Clone)]
