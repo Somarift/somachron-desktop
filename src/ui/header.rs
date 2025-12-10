@@ -92,6 +92,8 @@ impl HeaderUi {
     }
 
     fn change_mode(&mut self, _: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
+
         let new_mode = if cx.theme().mode.is_dark() {
             ThemeMode::Light
         } else {

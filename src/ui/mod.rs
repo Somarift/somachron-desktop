@@ -212,7 +212,7 @@ impl Render for Rooter {
                 win.remove_window();
             })
             .size_full()
-            .child(deferred(self.header_ui.clone()).with_priority(899))
+            .child(self.header_ui.clone())
             .when(self.auth_loading, |d| {
                 d.child(
                     div().size_full().flex().child(

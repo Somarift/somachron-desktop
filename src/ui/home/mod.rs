@@ -125,7 +125,7 @@ impl create_space_dialog::CreateSpaceDialog for HomeUi {
 impl Render for HomeUi {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .pt_8()
+            .pt(px(34.))
             .flex()
             .size_full()
             // .child(
@@ -200,7 +200,10 @@ impl HomeUi {
                                 "Create your space and upload files to access them anywhere.",
                             ),
                         )
-                        .child(Button::new("create_new_space").label("Create space")),
+                        .child(create_space_dialog::trigger(
+                            cx.weak_entity(),
+                            gpui_component::Size::default(),
+                        )),
                 )
             } else {
                 this.child(

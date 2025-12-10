@@ -2,13 +2,12 @@ use std::ops::Range;
 
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Side, Sizable, StyledExt, WindowExt,
+    ActiveTheme, Disableable, Icon, IconName, Side, Sizable, StyledExt, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
     notification::Notification,
-    scroll::{ScrollableElement, ScrollbarAxis},
-    sidebar::{Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
-    v_flex,
+    scroll::ScrollableElement,
+    sidebar::{Sidebar, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
 };
 use uuid::Uuid;
 
@@ -407,105 +406,42 @@ impl Render for BrowseUi {
                     .flex()
                     .flex_col()
                     .size_full()
-                    .child(
-                        deferred(
-                            div()
-                                .absolute()
-                                .bottom_0()
-                                .flex()
-                                .flex_shrink_0()
-                                .items_center()
-                                .bg(cx.theme().sidebar)
-                                .border_t_1()
-                                .border_color(cx.theme().sidebar_border)
-                                .px_2()
-                                .py_1p5()
-                                .w_full()
-                                .justify_between()
-                                .child(
-                                    h_flex()
-                                        .id("browse_header")
-                                        .w_56()
-                                        .overflow_x_scroll()
-                                        .track_scroll(&self.header_scroll_handle)
-                                        .text_sm()
-                                        .map(|this| {
-                                            if self.loading {
-                                                this.child(loading_icon(|icon| icon.size_4()))
-                                            } else if let Some(folder) = self.folder.as_ref() {
-                                                this.child(folder.path.replace("/", " / "))
-                                            } else {
-                                                this.child("...")
-                                            }
-                                        }),
-                                )
-                                .child(
-                                    h_flex()
+                    .child(deferred(self.render_browse_status(cx)).with_priority(999))
+                    // .child(self.render_folder_cards(cx))
+                    .map(|this| {
+                        if self.files.is_empty() {
+                            this.child(
+                                div().p_2().child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .w_full()
+                                        .items_center()
+                                        .justify_center()
+                                        .border_color(cx.theme().sidebar_border)
+                                        .border_1()
+                                        .border_dashed()
+                                        .rounded_lg()
+                                        .p_4()
                                         .gap_2()
-                                        .child(
-                                            Button::new("members")
-                                                .icon(Icon::empty().path("icons/users.svg"))
-                                                .small()
-                                                .ghost()
-                                                .border_1()
-                                                .border_color(cx.theme().sidebar_border),
-                                        )
+                                        .child(div().rounded_md().p_2().bg(cx.theme().muted).child(
+                                            Icon::new(IconName::GalleryVerticalEnd).size_5(),
+                                        ))
+                                        .child(div().text_lg().child("No media"))
+                                        .child(div().child("Upload files to access them anywhere."))
                                         .child(
                                             Button::new("upload")
                                                 .primary()
                                                 .icon(Icon::empty().path("icons/upload.svg"))
                                                 .label("Upload")
-                                                .small(),
+                                                .disabled(self.loading),
                                         ),
-                                )
-                                .horizontal_scrollbar(&self.header_scroll_handle),
-                        )
-                        .with_priority(999),
-                    )
-                    // .child(self.render_folder_cards(cx))
-                    .child(
-                        div()
-                            .id("browse_ui")
-                            .size_full()
-                            .overflow_y_scroll()
-                            .child(
-                                div()
-                                    .id("files_scroll")
-                                    .size_full()
-                                    .overflow_y_scroll()
-                                    .p_2()
-                                    .child(self.render_file_list(window, cx))
-                                    .child({
-                                        let this = cx.entity();
-                                        canvas(
-                                            move |_b, _w, _c| {},
-                                            move |_b, _d, _w, cx| {
-                                                this.update(cx, |this, cx| {
-                                                    let size =
-                                                        this.files_scroll_handle.bounds().size;
-                                                    let emitted = this.render_bounds.update(
-                                                        cx,
-                                                        |bounds, cx| {
-                                                            bounds
-                                                                .w_event(size.width)
-                                                                .map(|ev| {
-                                                                    cx.emit(ev);
-                                                                    true
-                                                                })
-                                                                .unwrap_or(false)
-                                                        },
-                                                    );
-                                                    if !emitted {
-                                                        Self::update_visible_state(this, cx);
-                                                    }
-                                                });
-                                            },
-                                        )
-                                    })
-                                    .track_scroll(&self.files_scroll_handle),
+                                ),
                             )
-                            .vertical_scrollbar(&self.files_scroll_handle),
-                    ),
+                        } else {
+                            this.child(self.render_file_list(window, cx))
+                        }
+                    }),
             )
             .child({
                 let this = cx.entity();
@@ -585,7 +521,8 @@ impl BrowseUi {
                     .w_full()
                     .icon(Icon::empty().path("icons/folder-plus.svg"))
                     .label("Create folder")
-                    .small(),
+                    .small()
+                    .disabled(self.loading),
             )
     }
 
@@ -632,88 +569,189 @@ impl BrowseUi {
             }))
     }
 
+    fn render_browse_status(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .bottom_0()
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .bg(cx.theme().sidebar)
+            .border_t_1()
+            .border_color(cx.theme().sidebar_border)
+            .px_2()
+            .py_1p5()
+            .w_full()
+            .justify_between()
+            .child(
+                h_flex()
+                    .id("browse_header")
+                    .w_56()
+                    .overflow_x_scroll()
+                    .track_scroll(&self.header_scroll_handle)
+                    .text_sm()
+                    .map(|this| {
+                        if self.loading {
+                            this.child(loading_icon(|icon| icon.size_4()))
+                        } else if let Some(folder) = self.folder.as_ref() {
+                            this.child(folder.path.replace("/", " / "))
+                        } else {
+                            this.child("...")
+                        }
+                    }),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("members")
+                            .icon(Icon::empty().path("icons/users.svg"))
+                            .small()
+                            .ghost()
+                            .border_1()
+                            .border_color(cx.theme().sidebar_border)
+                            .disabled(self.loading),
+                    )
+                    .child(
+                        Button::new("upload")
+                            .primary()
+                            .icon(Icon::empty().path("icons/upload.svg"))
+                            .label("Upload")
+                            .small()
+                            .disabled(self.loading),
+                    ),
+            )
+            .horizontal_scrollbar(&self.header_scroll_handle)
+    }
+
     fn render_file_list(
         &mut self,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        div().flex().flex_wrap().gap_2().pb_12().children(
-            self.files.iter().cloned().enumerate().map(|(i, file)| {
-                let this = cx.entity();
-                if self.visible_item_range.contains(&i) {
-                    div()
-                        .h(MEDIA_HEIGHT)
-                        .w(px(file.width as f32))
-                        .rounded_md()
-                        .relative()
-                        .group(SharedString::new(file.id.to_string()))
-                        .flex_shrink_0()
-                        .map(|this| {
-                            if let Some(MediaState::Loaded(urls)) =
-                                self.media_states.get(i).cloned()
-                            {
-                                this.child(
-                                    img(ImageSource::Resource(Resource::Uri(SharedUri::from(
-                                        urls.thumbnail_stream,
-                                    ))))
-                                    .image_cache(&self.image_cache)
-                                    .object_fit(ObjectFit::Cover)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .id(SharedString::new(format!("{i}")))
-                                    .absolute()
-                                    .inset_0()
+        div()
+            .id("browse_ui")
+            .size_full()
+            .overflow_y_scroll()
+            .child(
+                div()
+                    .id("files_scroll")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .p_2()
+                    .child(div().flex().flex_wrap().gap_2().pb_12().children(
+                        self.files.iter().cloned().enumerate().map(|(i, file)| {
+                            let this = cx.entity();
+                            if self.visible_item_range.contains(&i) {
+                                div()
                                     .h(MEDIA_HEIGHT)
                                     .w(px(file.width as f32))
                                     .rounded_md()
-                                    .overflow_hidden()
-                                    .with_loading(|| {
-                                        loading_icon(|icon| icon.size_4()).into_any_element()
-                                    }),
-                                )
+                                    .relative()
+                                    .group(SharedString::new(file.id.to_string()))
+                                    .flex_shrink_0()
+                                    .map(|this| {
+                                        if let Some(MediaState::Loaded(urls)) =
+                                            self.media_states.get(i).cloned()
+                                        {
+                                            this.child(
+                                                img(ImageSource::Resource(Resource::Uri(
+                                                    SharedUri::from(urls.thumbnail_stream),
+                                                )))
+                                                .image_cache(&self.image_cache)
+                                                .object_fit(ObjectFit::Cover)
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .id(SharedString::new(format!("{i}")))
+                                                .absolute()
+                                                .inset_0()
+                                                .h(MEDIA_HEIGHT)
+                                                .w(px(file.width as f32))
+                                                .rounded_md()
+                                                .overflow_hidden()
+                                                .with_loading(|| {
+                                                    loading_icon(|icon| icon.size_4())
+                                                        .into_any_element()
+                                                })
+                                                .border_1()
+                                                .border_color(cx.theme().sidebar_border),
+                                            )
+                                        } else {
+                                            this.bg(cx.theme().muted)
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .child(loading_icon(|icon| icon.size_4()))
+                                        }
+                                    })
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .bottom_0()
+                                            .left_0()
+                                            .right_0()
+                                            .bg(black().opacity(0.3))
+                                            .rounded_b_md()
+                                            .text_color(white())
+                                            .text_sm()
+                                            .px_2()
+                                            .py_1()
+                                            .opacity(0.)
+                                            .group_hover(
+                                                SharedString::new(file.id.to_string()),
+                                                |el| el.opacity(100.),
+                                            )
+                                            .truncate()
+                                            .child(file.file_name.clone()),
+                                    )
+                                    .on_children_prepainted(move |_b, window, cx| {
+                                        this.update(cx, |this, cx| {
+                                            Self::fetch_image_urls(
+                                                this,
+                                                window,
+                                                cx,
+                                                i,
+                                                file.id.clone(),
+                                            );
+                                            cx.notify();
+                                        });
+                                    })
                             } else {
-                                this.bg(cx.theme().muted)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(loading_icon(|icon| icon.size_4()))
+                                div()
+                                    .h(MEDIA_HEIGHT)
+                                    .w(px(file.width as f32))
+                                    .rounded_md()
+                                    .bg(cx.theme().sidebar)
+                                    .child(file.file_name)
                             }
-                        })
-                        .child(
-                            div()
-                                .absolute()
-                                .bottom_0()
-                                .left_0()
-                                .right_0()
-                                .bg(black().opacity(0.3))
-                                .rounded_b_md()
-                                .text_color(white())
-                                .text_sm()
-                                .px_2()
-                                .py_1()
-                                .opacity(0.)
-                                .group_hover(SharedString::new(file.id.to_string()), |el| {
-                                    el.opacity(100.)
-                                })
-                                .truncate()
-                                .child(file.file_name.clone()),
+                        }),
+                    ))
+                    .child({
+                        let this = cx.entity();
+                        canvas(
+                            move |_b, _w, _c| {},
+                            move |_b, _d, _w, cx| {
+                                this.update(cx, |this, cx| {
+                                    let size = this.files_scroll_handle.bounds().size;
+                                    let emitted = this.render_bounds.update(cx, |bounds, cx| {
+                                        bounds
+                                            .w_event(size.width)
+                                            .map(|ev| {
+                                                cx.emit(ev);
+                                                true
+                                            })
+                                            .unwrap_or(false)
+                                    });
+                                    if !emitted {
+                                        Self::update_visible_state(this, cx);
+                                    }
+                                });
+                            },
                         )
-                        .on_children_prepainted(move |_b, window, cx| {
-                            this.update(cx, |this, cx| {
-                                Self::fetch_image_urls(this, window, cx, i, file.id.clone());
-                                cx.notify();
-                            });
-                        })
-                } else {
-                    div()
-                        .h(MEDIA_HEIGHT)
-                        .w(px(file.width as f32))
-                        .rounded_md()
-                        .bg(cx.theme().sidebar)
-                        .child(file.file_name)
-                }
-            }),
-        )
+                    })
+                    .track_scroll(&self.files_scroll_handle),
+            )
+            .vertical_scrollbar(&self.files_scroll_handle)
     }
 }
