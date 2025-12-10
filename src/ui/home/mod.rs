@@ -1,6 +1,6 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, StyledExt, WindowExt, button::Button, h_flex, label::Label,
+    ActiveTheme, Icon, IconName, Sizable, StyledExt, WindowExt, h_flex, label::Label,
     notification::Notification, tooltip::Tooltip, v_flex,
 };
 
@@ -10,7 +10,7 @@ use crate::{
     nav::{NavEvent, NavState, Navigation},
     rt,
     ui::{
-        _components::{RenderBounds, create_space_dialog, loading_icon},
+        _components::{create_space_dialog, loading_icon},
         home::browse::BrowseUi,
     },
     util::MapAsync,
@@ -37,10 +37,8 @@ impl HomeUi {
         user_state: UserState,
         nav: Navigation,
         _window: &mut Window,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> Self {
-        let scroll_bounds = cx.new(|_cx| RenderBounds::new());
-
         Self {
             auth,
             user_state,
@@ -200,10 +198,7 @@ impl HomeUi {
                                 "Create your space and upload files to access them anywhere.",
                             ),
                         )
-                        .child(create_space_dialog::trigger(
-                            cx.weak_entity(),
-                            gpui_component::Size::default(),
-                        )),
+                        .child(create_space_dialog::trigger(cx.weak_entity())),
                 )
             } else {
                 this.child(
@@ -212,10 +207,7 @@ impl HomeUi {
                         .items_center()
                         .justify_between()
                         .child(Label::new("Spaces"))
-                        .child(create_space_dialog::trigger(
-                            cx.weak_entity(),
-                            gpui_component::Size::Small,
-                        )),
+                        .child(create_space_dialog::trigger(cx.weak_entity()).small()),
                 )
                 .child(div().flex().flex_wrap().gap_2().children(
                     self.user_state.read(cx).user_spaces.iter().map(|m| {

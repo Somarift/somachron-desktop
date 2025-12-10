@@ -1,6 +1,9 @@
 use uuid::Uuid;
 
-use crate::web::api::models::cloud::res::StreamedUrlsResponse;
+use crate::web::api::{
+    EmptyResponse,
+    models::cloud::{req::CreateFolderRequest, res::StreamedUrlsResponse},
+};
 
 use super::{
     AppError,
@@ -37,4 +40,22 @@ pub async fn get_stream_urls(
     file_id: &Uuid,
 ) -> Result<StreamedUrlsResponse, AppError> {
     super::get(format!("/media/stream/{file_id}"), token, Some(space_id)).await
+}
+
+pub async fn create_folder(
+    token: &str,
+    space_id: &Uuid,
+    folder_id: &Uuid,
+    name: String,
+) -> Result<EmptyResponse, AppError> {
+    super::post(
+        "/media/mkdir",
+        &token,
+        Some(space_id),
+        CreateFolderRequest {
+            parent_folder_id: *folder_id,
+            folder_name: name,
+        },
+    )
+    .await
 }

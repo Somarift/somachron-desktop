@@ -2,6 +2,7 @@ use gpui::*;
 use gpui_component::{Icon, IconName};
 
 pub mod app_icon;
+pub mod create_folder_dialog;
 pub mod create_space_dialog;
 pub mod select_space_dialog;
 

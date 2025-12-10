@@ -1,12 +1,5 @@
 use gpui::*;
-use gpui_component::{
-    ActiveTheme, Icon, IconName, StyledExt, WindowExt,
-    button::Button,
-    dialog::Dialog,
-    input::InputState,
-    scroll::{ScrollableElement, ScrollbarAxis},
-    v_flex,
-};
+use gpui_component::{ActiveTheme, Icon, IconName, StyledExt, dialog::Dialog, v_flex};
 
 use crate::{
     nav::NavState, ui::_components::create_space_dialog,
@@ -29,10 +22,7 @@ pub fn comp<T: create_space_dialog::CreateSpaceDialog + 'static>(
         .max_h_128()
         .footer(move |_, _, _, _| {
             let entity = _entity.clone();
-            vec![create_space_dialog::trigger(
-                entity,
-                gpui_component::Size::default(),
-            )]
+            vec![create_space_dialog::trigger(entity)]
         })
         .child(
             div()

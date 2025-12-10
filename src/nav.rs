@@ -31,6 +31,7 @@ pub type Navigation = Entity<NavStack>;
 
 pub enum NavEvent {
     Refresh,
+    RefreshView(NavState),
     NewSpace(Uuid),
 }
 impl EventEmitter<NavEvent> for NavStack {}

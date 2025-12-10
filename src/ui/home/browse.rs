@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, IconName, Side, Sizable, StyledExt, WindowExt,
+    ActiveTheme, Disableable, Icon, IconName, Side, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
     notification::Notification,
@@ -16,7 +16,7 @@ use crate::{
     ctx::UserState,
     nav::{NavEvent, NavId, NavState, Navigation},
     rt,
-    ui::_components::{self, MEDIA_HEIGHT, RenderBounds, loading_icon},
+    ui::_components::{self, MEDIA_HEIGHT, RenderBounds, create_folder_dialog, loading_icon},
     util::MapAsync,
     web::api::{
         self,
@@ -52,7 +52,9 @@ pub struct BrowseUi {
     files_scroll_handle: ScrollHandle,
     header_scroll_handle: ScrollHandle,
 
-    loading: bool,
+    loading_folders: bool,
+    loading_files: bool,
+    creating_folder: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -80,9 +82,19 @@ impl BrowseUi {
         );
 
         let nav_sub = cx.subscribe_in(&nav, window, |this, _entity, event, window, cx| {
-            if let NavEvent::Refresh = event {
-                this.reset_state();
-                this.fetch_fs(window, cx);
+            let (refresh, fetch_files) = match event {
+                NavEvent::Refresh => (true, true),
+                NavEvent::RefreshView(nav_state) => (true, &this.current_nav == nav_state),
+                _ => (false, false),
+            };
+
+            if refresh {
+                if fetch_files {
+                    this.reset_state();
+                    this.fetch_files(window, cx);
+                }
+
+                this.fetch_folders(window, cx);
             }
         });
 
@@ -103,7 +115,9 @@ impl BrowseUi {
             scroll_offset: px(-1.),
             files_scroll_handle: ScrollHandle::new(),
             header_scroll_handle: ScrollHandle::new(),
-            loading: false,
+            loading_folders: false,
+            loading_files: false,
+            creating_folder: false,
             _subscriptions: vec![size_sub, nav_sub],
         }
     }
@@ -118,7 +132,8 @@ impl BrowseUi {
     ) -> Entity<Self> {
         cx.new(|cx| {
             let mut entity = Self::new(auth, user_state, nav, current_nav, window, cx);
-            entity.fetch_fs(window, cx);
+            entity.fetch_folders(window, cx);
+            entity.fetch_files(window, cx);
             entity
         })
     }
@@ -218,7 +233,7 @@ impl BrowseUi {
         cx.notify();
     }
 
-    fn fetch_fs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn fetch_folders(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.current_nav.clone();
         let space_id = state.space_id.clone();
         let folder_id = state.folder_id.clone();
@@ -232,22 +247,6 @@ impl BrowseUi {
                 .await
                 .map_async(async move |token| {
                     api::cloud::list_folders(&token, &space_id.clone(), &folder_id.clone()).await
-                })
-                .await
-        });
-
-        let _inner = inner.clone();
-        let files = rt::spawn(cx, async move {
-            _inner
-                .get_token()
-                .await
-                .map_async(async move |token| {
-                    api::cloud::list_files(
-                        &token,
-                        &state.space_id.clone(),
-                        &state.folder_id.clone(),
-                    )
-                    .await
                 })
                 .await
         });
@@ -269,16 +268,15 @@ impl BrowseUi {
 
         cx.spawn_in(window, async move |this, cx| {
             let _ = this.update(cx, |this, cx| {
-                this.loading = true;
+                this.loading_folders = true;
                 cx.notify();
             });
 
             let folders = folders.await.flatten();
             let folder = folder.await.flatten();
-            let files = files.await.flatten();
 
             let _ = this.update_in(cx, |this, window, cx| {
-                this.loading = false;
+                this.loading_folders = false;
                 match folders {
                     Ok(folders) => {
                         this.folders = folders;
@@ -291,6 +289,52 @@ impl BrowseUi {
                     ),
                 };
 
+                match folder {
+                    Ok(folder) => this.folder = Some(folder),
+                    Err(err) => window.push_notification(
+                        Notification::error(err.message)
+                            .title("Failed to get current folder")
+                            .autohide(false),
+                        cx,
+                    ),
+                };
+
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn fetch_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.current_nav.clone();
+
+        let inner = self.auth.read(cx).inner();
+
+        let files = rt::spawn(cx, async move {
+            inner
+                .get_token()
+                .await
+                .map_async(async move |token| {
+                    api::cloud::list_files(
+                        &token,
+                        &state.space_id.clone(),
+                        &state.folder_id.clone(),
+                    )
+                    .await
+                })
+                .await
+        });
+
+        cx.spawn_in(window, async move |this, cx| {
+            let _ = this.update(cx, |this, cx| {
+                this.loading_files = true;
+                cx.notify();
+            });
+
+            let files = files.await.flatten();
+
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.loading_files = false;
                 match files {
                     Ok(files) => {
                         this.files = files;
@@ -302,16 +346,6 @@ impl BrowseUi {
                     Err(err) => window.push_notification(
                         Notification::error(err.message)
                             .title("Failed to get files")
-                            .autohide(false),
-                        cx,
-                    ),
-                };
-
-                match folder {
-                    Ok(folder) => this.folder = Some(folder),
-                    Err(err) => window.push_notification(
-                        Notification::error(err.message)
-                            .title("Failed to get current folder")
                             .autohide(false),
                         cx,
                     ),
@@ -389,6 +423,67 @@ impl BrowseUi {
     }
 }
 
+impl create_folder_dialog::CreateFolderDialog for BrowseUi {
+    fn create_folder(&mut self, name: SharedString, window: &mut Window, cx: &mut Context<Self>) {
+        let inner = self.auth.read(cx).inner();
+        let nav_state = self.current_nav.clone();
+
+        let task = rt::spawn(cx, async move {
+            inner
+                .get_token()
+                .await
+                .map_async(async move |token| {
+                    api::cloud::create_folder(
+                        &token,
+                        &nav_state.space_id,
+                        &nav_state.folder_id,
+                        name.as_str().to_owned(),
+                    )
+                    .await
+                })
+                .await
+        });
+
+        cx.spawn_in(window, async move |this, cx| {
+            let _ = this.update(cx, |this, cx| {
+                this.creating_folder = true;
+                cx.notify();
+            });
+
+            let result = task.await.flatten();
+
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.creating_folder = false;
+
+                match result {
+                    Ok(_) => {
+                        window.close_all_dialogs(cx);
+
+                        this.fetch_folders(window, cx);
+                    }
+                    Err(err) => window.push_notification(
+                        Notification::error(err.message).title("Failed to create folder"),
+                        cx,
+                    ),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn current_path(&self) -> String {
+        self.folder
+            .as_ref()
+            .map(|f| f.path.clone())
+            .unwrap_or_default()
+    }
+
+    fn is_loading(&self) -> bool {
+        self.creating_folder
+    }
+}
+
 impl NavId for BrowseUi {
     fn id(&self) -> NavState {
         self.current_nav.clone()
@@ -434,7 +529,7 @@ impl Render for BrowseUi {
                                                 .primary()
                                                 .icon(Icon::empty().path("icons/upload.svg"))
                                                 .label("Upload")
-                                                .disabled(self.loading),
+                                                .disabled(self.loading_folders),
                                         ),
                                 ),
                             )
@@ -463,7 +558,6 @@ impl Render for BrowseUi {
 impl BrowseUi {
     fn render_sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         Sidebar::new(Side::Left)
-            // .border_width(0.)
             .header(
                 SidebarHeader::new().child(
                     h_flex()
@@ -474,7 +568,7 @@ impl BrowseUi {
             )
             .child(
                 SidebarGroup::new("Folders").child(SidebarMenu::new().when_else(
-                    self.loading,
+                    self.loading_folders,
                     |el| {
                         el.child(
                             SidebarMenuItem::new("Loading")
@@ -516,57 +610,11 @@ impl BrowseUi {
                 )),
             )
             .footer(
-                Button::new("create_folder")
-                    .primary()
+                create_folder_dialog::trigger(cx.weak_entity())
                     .w_full()
-                    .icon(Icon::empty().path("icons/folder-plus.svg"))
-                    .label("Create folder")
                     .small()
-                    .disabled(self.loading),
+                    .disabled(self.loading_folders),
             )
-    }
-
-    fn render_folder_cards(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_wrap()
-            .flex_auto()
-            .gap_2()
-            .children(self.folders.iter().cloned().map(|folder| {
-                div()
-                    .flex_auto()
-                    .id(SharedString::new(folder.id.to_string()))
-                    .on_click(cx.listener(move |this, _ev, window, cx| {
-                        let folder_id = &folder.id;
-                        this.nav.update(cx, |stack, cx| {
-                            stack.push(
-                                BrowseUi::view(
-                                    this.auth.clone(),
-                                    this.user_state.clone(),
-                                    this.nav.clone(),
-                                    NavState::new(this.current_nav.space_id, folder_id.clone()),
-                                    window,
-                                    cx,
-                                ),
-                                cx,
-                            );
-                            cx.notify();
-                        });
-                    }))
-                    .border_1()
-                    .rounded_lg()
-                    .p_4()
-                    .bg(cx.theme().accent)
-                    .child(
-                        div()
-                            .flex()
-                            .justify_start()
-                            .items_center()
-                            .gap_4()
-                            .child(Icon::new(IconName::Folder).size_4())
-                            .child(div().text_sm().flex_wrap().font_medium().child(folder.name)),
-                    )
-            }))
     }
 
     fn render_browse_status(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -591,7 +639,7 @@ impl BrowseUi {
                     .track_scroll(&self.header_scroll_handle)
                     .text_sm()
                     .map(|this| {
-                        if self.loading {
+                        if self.loading_folders {
                             this.child(loading_icon(|icon| icon.size_4()))
                         } else if let Some(folder) = self.folder.as_ref() {
                             this.child(folder.path.replace("/", " / "))
@@ -610,7 +658,7 @@ impl BrowseUi {
                             .ghost()
                             .border_1()
                             .border_color(cx.theme().sidebar_border)
-                            .disabled(self.loading),
+                            .disabled(self.loading_folders),
                     )
                     .child(
                         Button::new("upload")
@@ -618,7 +666,7 @@ impl BrowseUi {
                             .icon(Icon::empty().path("icons/upload.svg"))
                             .label("Upload")
                             .small()
-                            .disabled(self.loading),
+                            .disabled(self.loading_folders),
                     ),
             )
             .horizontal_scrollbar(&self.header_scroll_handle)

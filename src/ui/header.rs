@@ -67,6 +67,7 @@ impl HeaderUi {
                 NavEvent::NewSpace(space_id) => {
                     this.fetch_spaces(Some(space_id.clone()), window, cx);
                 }
+                _ => (),
             };
         });
 

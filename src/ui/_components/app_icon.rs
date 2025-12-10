@@ -19,7 +19,3 @@ pub fn icon<'a>(cx: &'a mut App) -> Icon {
         .text_color(cx.theme().primary_foreground)
         .path("icons/cloud-moon.svg")
 }
-
-pub fn btn(cx: &mut App, f: impl FnOnce(Icon) -> Icon) -> impl IntoElement {
-    div()
-}

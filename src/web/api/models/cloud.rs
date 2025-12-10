@@ -39,3 +39,14 @@ pub mod res {
         pub thumbnail_stream: String,
     }
 }
+
+pub mod req {
+    use serde::Serialize;
+    use uuid::Uuid;
+
+    #[derive(Debug, Serialize)]
+    pub struct CreateFolderRequest {
+        pub parent_folder_id: Uuid,
+        pub folder_name: String,
+    }
+}
