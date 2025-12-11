@@ -5,6 +5,7 @@ use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, Side, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     h_flex,
+    menu::DropdownMenu,
     notification::Notification,
     scroll::ScrollableElement,
     sidebar::{Sidebar, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
@@ -16,11 +17,17 @@ use crate::{
     ctx::UserState,
     nav::{NavEvent, NavId, NavState, Navigation},
     rt,
-    ui::_components::{self, MEDIA_HEIGHT, RenderBounds, create_folder_dialog, loading_icon},
+    ui::{
+        _components::{self, MEDIA_HEIGHT, RenderBounds, create_folder_dialog, loading_icon},
+        header::EmptyAction,
+    },
     util::MapAsync,
     web::api::{
         self,
-        models::cloud::res::{FileMetaReponse, FolderResponse, StreamedUrlsResponse},
+        models::cloud::{
+            MediaType,
+            res::{FileMetaReponse, FolderResponse, StreamedUrlsResponse},
+        },
     },
 };
 
@@ -583,9 +590,55 @@ impl BrowseUi {
                             |el| {
                                 el.children(self.folders.iter().map(|folder| {
                                     let folder_id = folder.id.clone();
+                                    let entity = cx.weak_entity();
 
                                     SidebarMenuItem::new(&folder.name)
                                         .icon(Icon::new(IconName::Folder))
+                                        .suffix(
+                                            Button::new("")
+                                                .icon(IconName::EllipsisVertical)
+                                                .small()
+                                                .ghost()
+                                                .on_click(move |_ev, _window, cx| {
+                                                    cx.stop_propagation();
+                                                })
+                                                .dropdown_menu(move |menu, window, cx| {
+                                                    let entity = entity.clone();
+
+                                                    menu.menu_element(
+                                                        Box::new(EmptyAction),
+                                                        move |_window, cx| {
+                                                            let entity = entity.clone();
+
+                                                            div()
+                                                                .id("")
+                                                                .flex()
+                                                                .gap_2()
+                                                                .items_center()
+                                                                .text_color(cx.theme().danger)
+                                                                .child(
+                                                                    Icon::new(IconName::Delete)
+                                                                        .small(),
+                                                                )
+                                                                .child(
+                                                                    div()
+                                                                        .child("Delete folder")
+                                                                        .text_sm(),
+                                                                )
+                                                                .on_click(move |_ev, window, cx| {
+                                                                    // cx.stop_propagation();
+
+                                                                    // let _ = entity.update(
+                                                                    //     cx,
+                                                                    //     |this, cx| {
+                                                                    //         cx.notify();
+                                                                    //     },
+                                                                    // );
+                                                                })
+                                                        },
+                                                    )
+                                                }),
+                                        )
                                         .on_click(cx.listener(move |this, _ev, window, cx| {
                                             this.nav.update(cx, |stack, cx| {
                                                 stack.push(
@@ -649,25 +702,12 @@ impl BrowseUi {
                     }),
             )
             .child(
-                h_flex()
-                    .gap_2()
-                    .child(
-                        Button::new("members")
-                            .icon(Icon::empty().path("icons/users.svg"))
-                            .small()
-                            .ghost()
-                            .border_1()
-                            .border_color(cx.theme().sidebar_border)
-                            .disabled(self.loading_folders),
-                    )
-                    .child(
-                        Button::new("upload")
-                            .primary()
-                            .icon(Icon::empty().path("icons/upload.svg"))
-                            .label("Upload")
-                            .small()
-                            .disabled(self.loading_folders),
-                    ),
+                Button::new("upload")
+                    .primary()
+                    .icon(Icon::empty().path("icons/upload.svg"))
+                    .label("Upload")
+                    .small()
+                    .disabled(self.loading_folders),
             )
             .horizontal_scrollbar(&self.header_scroll_handle)
     }
@@ -724,6 +764,31 @@ impl BrowseUi {
                                                 })
                                                 .border_1()
                                                 .border_color(cx.theme().sidebar_border),
+                                            )
+                                            .when(
+                                                matches!(file.media_type, MediaType::Video),
+                                                |this| {
+                                                    this.relative().child(
+                                                        div()
+                                                            .absolute()
+                                                            .inset_0()
+                                                            .size_full()
+                                                            .flex()
+                                                            .items_center()
+                                                            .justify_center()
+                                                            .child(
+                                                                div()
+                                                                    .p_2()
+                                                                    .rounded_full()
+                                                                    .bg(black().opacity(0.3))
+                                                                    .text_color(white())
+                                                                    .child(
+                                                                        Icon::empty()
+                                                                            .path("icons/play.svg"),
+                                                                    ),
+                                                            ),
+                                                    )
+                                                },
                                             )
                                         } else {
                                             this.bg(cx.theme().muted)

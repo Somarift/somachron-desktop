@@ -3,6 +3,7 @@ use gpui_component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable, ThemeMode, TitleBar, WindowExt,
     avatar::Avatar,
     button::{Button, ButtonVariants},
+    h_flex,
     menu::DropdownMenu,
     notification::Notification,
     v_flex,
@@ -371,104 +372,111 @@ impl HeaderUi {
     }
 
     fn render_space_switcher(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let entity = cx.weak_entity();
-
-        Button::new("space_switcher")
-            .small()
-            .compact()
-            .icon(Icon::new(IconName::GalleryVerticalEnd))
-            .dropdown_caret(true)
-            .map(|this| {
-                let us = self.nav.read(cx).current_space_id().and_then(|sp_id| {
-                    self.user_state
-                        .read(cx)
-                        .user_spaces
-                        .iter()
-                        .find_map(|us| {
-                            if &us.space.id == sp_id {
-                                Some(us)
-                            } else {
-                                None
-                            }
-                        })
-                        .cloned()
-                });
-
-                match us {
-                    Some(us) => this.child(
-                        v_flex()
-                            .items_center()
-                            .justify_center()
-                            .w_40()
-                            .overflow_hidden()
-                            .truncate()
-                            .text_ellipsis()
-                            .child(
-                                div()
-                                    .whitespace_normal()
-                                    .child(us.space.name.clone())
-                                    .text_sm(),
-                            ),
-                    ),
-                    None => this.child(
-                        v_flex()
-                            .items_center()
-                            .justify_center()
-                            .w_40()
-                            .child("Select space"),
-                    ),
+        let current_space = self.nav.read(cx).current_space_id().and_then(|sp_id| {
+            self.user_state.read(cx).user_spaces.iter().find_map(|us| {
+                if &us.space.id == sp_id {
+                    Some(us)
+                } else {
+                    None
                 }
             })
-            .text_sm()
-            .disabled(self.loading_spaces)
-            .loading(self.loading_spaces)
-            .loading_icon(IconName::LoaderCircle)
-            .on_click(move |_ev, window, cx| {
-                cx.stop_propagation();
-                let entity = entity.clone();
+        });
+        let entity = cx.weak_entity();
 
-                window.open_dialog(cx, move |dialog, _window, cx| {
-                    let entity = entity.clone();
-                    let user_spaces = entity
-                        .read_with(cx, |this, cx| this.user_state.read(cx).user_spaces.clone())
-                        .unwrap_or_default();
+        h_flex()
+            .gap_2()
+            .child(
+                Button::new("space_switcher")
+                    .small()
+                    .compact()
+                    .icon(Icon::new(IconName::GalleryVerticalEnd))
+                    .dropdown_caret(true)
+                    .map(|this| match current_space.cloned() {
+                        Some(us) => this.child(
+                            v_flex()
+                                .items_center()
+                                .justify_center()
+                                .w_40()
+                                .overflow_hidden()
+                                .truncate()
+                                .text_ellipsis()
+                                .child(
+                                    div()
+                                        .whitespace_normal()
+                                        .child(us.space.name.clone())
+                                        .text_sm(),
+                                ),
+                        ),
+                        None => this.child(
+                            v_flex()
+                                .items_center()
+                                .justify_center()
+                                .w_40()
+                                .child("Select space"),
+                        ),
+                    })
+                    .text_sm()
+                    .disabled(self.loading_spaces)
+                    .loading(self.loading_spaces)
+                    .loading_icon(IconName::LoaderCircle)
+                    .on_click(move |_ev, window, cx| {
+                        cx.stop_propagation();
+                        let entity = entity.clone();
 
-                    select_space_dialog::comp::<Self>(
-                        dialog,
-                        entity,
-                        user_spaces,
-                        cx,
-                        |entity, state, window, cx| {
-                            entity
-                                .clone()
-                                .update(cx, |this, cx| {
-                                    this.nav.update(cx, |stack, cx| {
-                                        if let Some(current_space_id) = stack.current_space_id()
-                                            && current_space_id == &state.space_id
-                                        {
-                                            // skip
-                                            return;
-                                        }
-
-                                        stack.push(
-                                            BrowseUi::view(
-                                                this.auth.clone(),
-                                                this.user_state.clone(),
-                                                this.nav.clone(),
-                                                state,
-                                                window,
-                                                cx,
-                                            ),
-                                            cx,
-                                        );
-                                    });
+                        window.open_dialog(cx, move |dialog, _window, cx| {
+                            let entity = entity.clone();
+                            let user_spaces = entity
+                                .read_with(cx, |this, cx| {
+                                    this.user_state.read(cx).user_spaces.clone()
                                 })
-                                .ok();
+                                .unwrap_or_default();
 
-                            window.close_dialog(cx);
-                        },
-                    )
-                });
+                            select_space_dialog::comp(
+                                dialog,
+                                entity,
+                                user_spaces,
+                                cx,
+                                |entity, state, window, cx| {
+                                    entity
+                                        .clone()
+                                        .update(cx, |this, cx| {
+                                            this.nav.update(cx, |stack, cx| {
+                                                if let Some(current_space_id) =
+                                                    stack.current_space_id()
+                                                    && current_space_id == &state.space_id
+                                                {
+                                                    // skip
+                                                    return;
+                                                }
+
+                                                stack.push(
+                                                    BrowseUi::view(
+                                                        this.auth.clone(),
+                                                        this.user_state.clone(),
+                                                        this.nav.clone(),
+                                                        state,
+                                                        window,
+                                                        cx,
+                                                    ),
+                                                    cx,
+                                                );
+                                            });
+                                        })
+                                        .ok();
+
+                                    window.close_dialog(cx);
+                                },
+                            )
+                        });
+                    }),
+            )
+            .when_some(current_space, |this, us| {
+                this.child(
+                    Button::new("members")
+                        .icon(Icon::empty().path("icons/users.svg"))
+                        .small()
+                        .disabled(self.loading_spaces),
+                )
             })
     }
 
