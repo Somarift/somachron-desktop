@@ -1,6 +1,7 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme as _, Disableable, Icon, IconName, Sizable, ThemeMode, TitleBar, WindowExt,
+    ActiveTheme as _, Disableable, Icon, IconName, Sizable, StyledExt, ThemeMode, TitleBar,
+    WindowExt,
     avatar::Avatar,
     button::{Button, ButtonVariants},
     h_flex,
@@ -373,13 +374,18 @@ impl HeaderUi {
 
     fn render_space_switcher(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let current_space = self.nav.read(cx).current_space_id().and_then(|sp_id| {
-            self.user_state.read(cx).user_spaces.iter().find_map(|us| {
-                if &us.space.id == sp_id {
-                    Some(us)
-                } else {
-                    None
-                }
-            })
+            self.user_state
+                .read(cx)
+                .user_spaces
+                .iter()
+                .find_map(|us| {
+                    if &us.space.id == sp_id {
+                        Some(us)
+                    } else {
+                        None
+                    }
+                })
+                .cloned()
         });
         let entity = cx.weak_entity();
 
@@ -391,7 +397,7 @@ impl HeaderUi {
                     .compact()
                     .icon(Icon::new(IconName::GalleryVerticalEnd))
                     .dropdown_caret(true)
-                    .map(|this| match current_space.cloned() {
+                    .map(|this| match current_space.clone() {
                         Some(us) => this.child(
                             v_flex()
                                 .items_center()
@@ -475,7 +481,24 @@ impl HeaderUi {
                     Button::new("members")
                         .icon(Icon::empty().path("icons/users.svg"))
                         .small()
-                        .disabled(self.loading_spaces),
+                        .disabled(self.loading_spaces)
+                        .on_click(cx.listener(move |this, _ev, window, cx| {
+                            let us = us.clone();
+
+                            window.open_sheet(cx, move |sheet, window, cx| {
+                                sheet.child(
+                                    v_flex()
+                                        .gap_3()
+                                        .child(
+                                            div()
+                                                .text_lg()
+                                                .font_medium()
+                                                .child(us.space.name.clone()),
+                                        )
+                                        .child(div().child("Members")),
+                                )
+                            });
+                        })),
                 )
             })
     }
@@ -491,8 +514,9 @@ impl HeaderUi {
                     .small()
                     .ghost()
                     .disabled(self.nav.read(cx).at_begining())
-                    .on_click(cx.listener(|this, _ev, _window, cx| {
+                    .on_click(cx.listener(|this, _ev, window, cx| {
                         cx.stop_propagation();
+                        window.close_sheet(cx);
 
                         this.nav.update(cx, |stack, cx| {
                             stack.back(cx);
@@ -505,8 +529,9 @@ impl HeaderUi {
                     .small()
                     .ghost()
                     .disabled(self.nav.read(cx).at_end())
-                    .on_click(cx.listener(|this, _ev, _window, cx| {
+                    .on_click(cx.listener(|this, _ev, window, cx| {
                         cx.stop_propagation();
+                        window.close_sheet(cx);
 
                         this.nav.update(cx, |stack, cx| {
                             stack.forward(cx);
@@ -518,8 +543,9 @@ impl HeaderUi {
                     .icon(Icon::empty().path("icons/rotate-ccw.svg"))
                     .small()
                     .ghost()
-                    .on_click(cx.listener(|this, _ev, _window, cx| {
+                    .on_click(cx.listener(|this, _ev, window, cx| {
                         cx.stop_propagation();
+                        window.close_sheet(cx);
 
                         this.nav.update(cx, |_nav, cx| {
                             cx.emit(NavEvent::Refresh);
@@ -532,8 +558,9 @@ impl HeaderUi {
                     .id("home")
                     .ml_1()
                     .hover(|el| el.bg(cx.theme().primary_hover))
-                    .on_click(cx.listener(|this, _ev, _window, cx| {
+                    .on_click(cx.listener(|this, _ev, window, cx| {
                         cx.stop_propagation();
+                        window.close_sheet(cx);
 
                         this.nav.update(cx, |stack, cx| {
                             stack.home(cx);

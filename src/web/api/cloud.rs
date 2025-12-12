@@ -59,3 +59,11 @@ pub async fn create_folder(
     )
     .await
 }
+
+pub async fn delete_folder(
+    token: &str,
+    space_id: &Uuid,
+    folder_id: &Uuid,
+) -> Result<EmptyResponse, AppError> {
+    super::delete(format!("/media/rm/{folder_id}"), &token, Some(space_id)).await
+}

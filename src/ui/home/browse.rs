@@ -1,9 +1,10 @@
-use std::ops::Range;
+use std::{collections::HashSet, ops::Range};
 
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, Side, Sizable, WindowExt,
     button::{Button, ButtonVariants},
+    checkbox::Checkbox,
     h_flex,
     menu::DropdownMenu,
     notification::Notification,
@@ -18,7 +19,9 @@ use crate::{
     nav::{NavEvent, NavId, NavState, Navigation},
     rt,
     ui::{
-        _components::{self, MEDIA_HEIGHT, RenderBounds, create_folder_dialog, loading_icon},
+        _components::{
+            self, MEDIA_HEIGHT, RenderBounds, create_folder_dialog, delete_dialog, loading_icon,
+        },
         header::EmptyAction,
     },
     util::MapAsync,
@@ -51,6 +54,7 @@ pub struct BrowseUi {
     folders: Vec<FolderResponse>,
     files: Vec<FileMetaReponse>,
     media_states: Vec<MediaState>,
+    file_checked: HashSet<Uuid>,
 
     item_rows: Vec<Range<usize>>,
     visible_rows: usize,
@@ -62,6 +66,7 @@ pub struct BrowseUi {
     loading_folders: bool,
     loading_files: bool,
     creating_folder: bool,
+    deleting_folder: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -116,6 +121,7 @@ impl BrowseUi {
             folders: Vec::new(),
             files: Vec::new(),
             media_states: Vec::new(),
+            file_checked: HashSet::new(),
             item_rows: Vec::new(),
             visible_rows: 0,
             visible_item_range: 0..0,
@@ -125,6 +131,7 @@ impl BrowseUi {
             loading_folders: false,
             loading_files: false,
             creating_folder: false,
+            deleting_folder: false,
             _subscriptions: vec![size_sub, nav_sub],
         }
     }
@@ -149,6 +156,7 @@ impl BrowseUi {
         self.folders.clear();
         self.files.clear();
         self.media_states.clear();
+        self.file_checked.clear();
         self.item_rows.clear();
         self.visible_rows = 0;
         self.visible_item_range = 0..0;
@@ -170,14 +178,14 @@ impl BrowseUi {
         for file in this.files.iter() {
             let fw = file.width as f32;
 
-            if px(fw + used_w + 2.) > bounds.width {
+            if px(fw + used_w + 1.) > bounds.width {
                 this.item_rows.push(start..(start + items_in_row));
 
                 start += items_in_row;
                 items_in_row = 1;
-                used_w = 16. + fw + 2.;
+                used_w = 16. + fw + 1.;
             } else {
-                used_w += fw + 2.; // gap-2
+                used_w += fw + 1.; // gap-1
                 items_in_row += 1;
             }
         }
@@ -206,17 +214,19 @@ impl BrowseUi {
             return;
         }
 
-        this.scroll_offset = offset;
+        this.scroll_offset = offset + px(34.) /* title bar offset */;
 
-        let start_index = (this.scroll_offset.abs() / (MEDIA_HEIGHT * 2.)).floor() as usize;
+        let media_height = MEDIA_HEIGHT + px(4.) /* vertical gap */;
+
+        let start_index = (this.scroll_offset.abs() / media_height).floor() as usize;
         let start_index = start_index.min(this.item_rows.len() - this.visible_rows);
-        let start_offset = (this.scroll_offset.abs() / MEDIA_HEIGHT) as usize;
-        let end_index = (start_offset + this.visible_rows).min(this.item_rows.len());
+        let end_index = (start_index + this.visible_rows).min(this.item_rows.len());
 
         // println!(
-        //     "offset: {} [{}] - start[{}]: {:?} - end[{}]: {:?}",
+        //     "offset: {} [{}]{} - start[{}]: {:?} - end[{}]: {:?}",
         //     offset,
         //     end_index - start_index,
+        //     this.visible_rows,
         //     start_index,
         //     this.item_rows.get(start_index),
         //     end_index,
@@ -491,6 +501,81 @@ impl create_folder_dialog::CreateFolderDialog for BrowseUi {
     }
 }
 
+impl delete_dialog::DeleteDialog for BrowseUi {
+    fn delete(
+        &mut self,
+        fs_id: delete_dialog::DeleteType,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let nav_state = self.current_nav.clone();
+        let inner = self.auth.read(cx).inner();
+
+        let fs = fs_id.clone();
+        let task = rt::spawn(cx, async move {
+            inner
+                .get_token()
+                .await
+                .map_async(async move |token| match fs {
+                    delete_dialog::DeleteType::File(uuid) => {
+                        todo!()
+                    }
+                    delete_dialog::DeleteType::Folder(uuid) => {
+                        api::cloud::delete_folder(&token, &nav_state.space_id, &uuid).await
+                    }
+                })
+                .await
+        });
+
+        cx.spawn_in(window, async move |this, cx| {
+            let _ = this.update(cx, |this, cx| {
+                this.deleting_folder = true;
+                cx.notify();
+            });
+
+            let result = task.await.flatten();
+
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.deleting_folder = false;
+
+                match result {
+                    Ok(_) => {
+                        window.close_all_dialogs(cx);
+
+                        match fs_id {
+                            delete_dialog::DeleteType::File(_) => {
+                                this.nav.update(cx, |_nav, cx| {
+                                    cx.emit(NavEvent::RefreshView(this.current_nav.clone()));
+                                });
+                            }
+                            delete_dialog::DeleteType::Folder(folder_id) => {
+                                this.fetch_folders(window, cx);
+
+                                this.nav.update(cx, |nav, cx| {
+                                    nav.remove_folder_views(folder_id, cx);
+                                    cx.notify();
+                                });
+                            }
+                        };
+                    }
+                    Err(err) => window.push_notification(
+                        Notification::error(err.message)
+                            .title(format!("Failed to delete {}", fs_id.get_type())),
+                        cx,
+                    ),
+                };
+
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn is_loading(&self) -> bool {
+        self.deleting_folder
+    }
+}
+
 impl NavId for BrowseUi {
     fn id(&self) -> NavState {
         self.current_nav.clone()
@@ -508,6 +593,9 @@ impl Render for BrowseUi {
                     .flex()
                     .flex_col()
                     .size_full()
+                    .when(self.file_checked.len() > 0, |this| {
+                        this.child(self.render_selections(cx))
+                    })
                     .child(deferred(self.render_browse_status(cx)).with_priority(999))
                     // .child(self.render_folder_cards(cx))
                     .map(|this| {
@@ -590,6 +678,7 @@ impl BrowseUi {
                             |el| {
                                 el.children(self.folders.iter().map(|folder| {
                                     let folder_id = folder.id.clone();
+                                    let folder_path = folder.path.clone();
                                     let entity = cx.weak_entity();
 
                                     SidebarMenuItem::new(&folder.name)
@@ -602,12 +691,14 @@ impl BrowseUi {
                                                 .on_click(move |_ev, _window, cx| {
                                                     cx.stop_propagation();
                                                 })
-                                                .dropdown_menu(move |menu, window, cx| {
+                                                .dropdown_menu(move |menu, _window, _cx| {
+                                                    let folder_path = folder_path.clone();
                                                     let entity = entity.clone();
 
                                                     menu.menu_element(
                                                         Box::new(EmptyAction),
                                                         move |_window, cx| {
+                                                            let folder_path = folder_path.clone();
                                                             let entity = entity.clone();
 
                                                             div()
@@ -626,14 +717,12 @@ impl BrowseUi {
                                                                         .text_sm(),
                                                                 )
                                                                 .on_click(move |_ev, window, cx| {
-                                                                    // cx.stop_propagation();
+                                                                    let folder_path = folder_path.clone();
+                                                                    let entity = entity.clone();
 
-                                                                    // let _ = entity.update(
-                                                                    //     cx,
-                                                                    //     |this, cx| {
-                                                                    //         cx.notify();
-                                                                    //     },
-                                                                    // );
+                                                                    window.open_dialog(cx, move |dialog, _window, cx| {
+                                                                        delete_dialog::comp(dialog, entity.clone(), delete_dialog::DeleteType::Folder(folder_id.clone()), folder_path.clone(), cx)
+                                                                    });
                                                                 })
                                                         },
                                                     )
@@ -686,7 +775,7 @@ impl BrowseUi {
             .justify_between()
             .child(
                 h_flex()
-                    .id("browse_header")
+                    .id("browse_footer")
                     .w_56()
                     .overflow_x_scroll()
                     .track_scroll(&self.header_scroll_handle)
@@ -712,6 +801,43 @@ impl BrowseUi {
             .horizontal_scrollbar(&self.header_scroll_handle)
     }
 
+    fn render_selections(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .items_center()
+            .bg(cx.theme().primary.opacity(0.2))
+            .px_2()
+            .py_1p5()
+            .w_full()
+            .justify_between()
+            .child(
+                h_flex()
+                    .id("selection_header")
+                    .gap_3()
+                    .text_sm()
+                    .child(format!("{} files selected", self.file_checked.len()))
+                    .child(
+                        Button::new("selection_clear")
+                            .primary()
+                            .icon(IconName::Close)
+                            .label("Clear")
+                            .small()
+                            .on_click(cx.listener(move |this, _ev, _window, cx| {
+                                this.file_checked.clear();
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(
+                Button::new("delete_files")
+                    .danger()
+                    .icon(IconName::Delete)
+                    .label(format!("Delete {} files", self.file_checked.len()))
+                    .small()
+                    .disabled(self.loading_folders),
+            )
+    }
+
     fn render_file_list(
         &mut self,
         _window: &mut Window,
@@ -727,9 +853,13 @@ impl BrowseUi {
                     .size_full()
                     .overflow_y_scroll()
                     .p_2()
-                    .child(div().flex().flex_wrap().gap_2().pb_12().children(
+                    .child(div().flex().flex_wrap().gap_1().pb_12().children(
                         self.files.iter().cloned().enumerate().map(|(i, file)| {
+                            // let file_id = file.id.clone();
+                            // let file_name = file.file_name.clone();
+
                             let this = cx.entity();
+                            // let entity = cx.weak_entity();
                             if self.visible_item_range.contains(&i) {
                                 div()
                                     .h(MEDIA_HEIGHT)
@@ -763,12 +893,19 @@ impl BrowseUi {
                                                         .into_any_element()
                                                 })
                                                 .border_1()
-                                                .border_color(cx.theme().sidebar_border),
+                                                .border_color(cx.theme().sidebar_border)
+                                                .when(
+                                                    self.file_checked.contains(&file.id),
+                                                    |this| {
+                                                        this.border_2()
+                                                            .border_color(cx.theme().primary)
+                                                    },
+                                                ),
                                             )
                                             .when(
                                                 matches!(file.media_type, MediaType::Video),
                                                 |this| {
-                                                    this.relative().child(
+                                                    this.child(
                                                         div()
                                                             .absolute()
                                                             .inset_0()
@@ -818,6 +955,49 @@ impl BrowseUi {
                                             .truncate()
                                             .child(file.file_name.clone()),
                                     )
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .flex()
+                                            .w_full()
+                                            .items_center()
+                                            .justify_end()
+                                            .map(|this| {
+                                                if !self.file_checked.contains(&file.id) {
+                                                    this.opacity(0.).group_hover(
+                                                        SharedString::new(file.id.to_string()),
+                                                        |el| el.opacity(100.),
+                                                    )
+                                                } else {
+                                                    this
+                                                }
+                                            })
+                                            .child(
+                                                Checkbox::new(SharedString::new(format!(
+                                                    "checkbox_{}",
+                                                    file.id
+                                                )))
+                                                .p_2()
+                                                .checked(self.file_checked.contains(&file.id))
+                                                .on_click(cx.listener(
+                                                    move |this, checked, _, cx| {
+                                                        if *checked {
+                                                            this.file_checked
+                                                                .insert(file.id.clone());
+                                                        } else {
+                                                            this.file_checked.remove(&file.id);
+                                                        }
+                                                        cx.notify();
+                                                    },
+                                                )), // div()
+                                                    //     .p_2()
+                                                    //     .rounded_full()
+                                                    //     .bg(black().opacity(0.3))
+                                                    //     .text_color(white())
+                                                    //     .child(Icon::empty().path("icons/play.svg")),
+                                            ),
+                                    )
                                     .on_children_prepainted(move |_b, window, cx| {
                                         this.update(cx, |this, cx| {
                                             Self::fetch_image_urls(
@@ -830,6 +1010,48 @@ impl BrowseUi {
                                             cx.notify();
                                         });
                                     })
+                                // .context_menu(move |menu, _window, cx| {
+                                //     let file_name = file_name.clone();
+                                //     let entity = entity.clone();
+
+                                //     menu.menu_element(
+                                //         Box::new(EmptyAction),
+                                //         move |_window, cx| {
+                                //             let file_name = file_name.clone();
+                                //             let entity = entity.clone();
+
+                                //             div()
+                                //                 .id("")
+                                //                 .flex()
+                                //                 .gap_2()
+                                //                 .items_center()
+                                //                 .text_color(cx.theme().danger)
+                                //                 .child(Icon::new(IconName::Delete).small())
+                                //                 .child(div().child("Delete file").text_sm())
+                                //                 .on_click(move |_ev, window, cx| {
+                                //                     println!("clicked!");
+
+                                //                     let file_name = file_name.clone();
+                                //                     let entity = entity.clone();
+
+                                //                     window.open_dialog(
+                                //                         cx,
+                                //                         move |dialog, _window, cx| {
+                                //                             delete_dialog::comp(
+                                //                                 dialog,
+                                //                                 entity.clone(),
+                                //                                 delete_dialog::DeleteType::File(
+                                //                                     file_id.clone(),
+                                //                                 ),
+                                //                                 file_name.clone(),
+                                //                                 cx,
+                                //                             )
+                                //                         },
+                                //                     );
+                                //                 })
+                                //         },
+                                //     )
+                                // })
                             } else {
                                 div()
                                     .h(MEDIA_HEIGHT)
@@ -837,6 +1059,7 @@ impl BrowseUi {
                                     .rounded_md()
                                     .bg(cx.theme().sidebar)
                                     .child(file.file_name)
+                                // .context_menu(move |menu, _window, _cx| menu)
                             }
                         }),
                     ))

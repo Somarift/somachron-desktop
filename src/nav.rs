@@ -108,6 +108,43 @@ impl NavStack {
         cx.notify();
     }
 
+    /// Upon folder deletion, remove all the views related to the folder_id
+    pub fn remove_folder_views<T: 'static>(&mut self, folder_id: Uuid, cx: &mut Context<T>) {
+        // although not possible
+        // if no current, just trim stack and views
+        let Some(_) = self.__current().cloned() else {
+            self.drop_later_and_views();
+            cx.notify();
+            return;
+        };
+
+        let mut entries = Vec::with_capacity(4);
+        let mut stack = Vec::with_capacity(self.stack.len());
+
+        for (i, state) in self.stack.iter().enumerate() {
+            if state.folder_id == folder_id {
+                // if there is view that is before current ptr, decrement it
+                if i + 1 < self.ptr {
+                    self.ptr = self.ptr.checked_sub(1).unwrap_or_default();
+                }
+                entries.push(state.clone());
+            } else {
+                stack.push(state.clone());
+            }
+        }
+
+        // i know it's size will be 1 but who knows !
+        // remove all views where folder_id matched
+        for state in entries.into_iter() {
+            let _ = self.views.remove(&state);
+        }
+        self.stack = stack;
+
+        // yeah, i want to crash
+        assert!(self.ptr <= self.stack.len());
+        cx.notify();
+    }
+
     fn drop_later_and_views(&mut self) {
         // trim stack
         self.stack = self.stack.drain(..self.ptr).collect();

@@ -206,6 +206,7 @@ impl Render for Rooter {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let notification_layer = Root::render_notification_layer(window, cx);
         let dialog_layer = Root::render_dialog_layer(window, cx);
+        let sheet_layer = Root::render_sheet_layer(window, cx);
 
         div()
             .on_action(|_: &CloseWindow, win, _| {
@@ -254,5 +255,6 @@ impl Render for Rooter {
             })
             .when_some(notification_layer, |d, layer| d.child(layer))
             .when_some(dialog_layer, |d, layer| d.child(layer))
+            .when_some(sheet_layer, |d, layer| d.child(layer))
     }
 }
