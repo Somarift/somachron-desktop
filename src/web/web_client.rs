@@ -33,9 +33,9 @@ impl WebClient {
 pub fn make_user_agent() -> reqwest::header::HeaderValue {
     reqwest::header::HeaderValue::from_str(
         format!(
-            "Somachron-Desktop/0.1.0 ({} - {})",
+            "Somachron-Desktop/0.1.0 ({} {}) GPUI/0.2.2",
             util::os_name(),
-            util::os_version()
+            util::os_version(),
         )
         .as_str(),
     )

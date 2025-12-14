@@ -1,10 +1,10 @@
 use gpui::{prelude::FluentBuilder, *};
-use gpui_component::{ActiveTheme, Root, WindowExt, notification::Notification, v_flex};
+use gpui_component::{ActiveTheme, Root, WindowExt, notification::Notification};
 use header::HeaderUi;
 
 use crate::{
     auth::{Auth, AuthClientEvent, AuthEvent, AuthState, SessionState},
-    ctx::{UserData, UserState},
+    ctx::UserData,
     nav::NavStack,
     rt,
     ui::{home::HomeUi, login::LoginUi},
@@ -15,41 +15,45 @@ mod header;
 mod home;
 mod login;
 
-actions!(window, [CloseWindow]);
+actions!(window, [CloseWindow, Quit]);
+pub const APP_CONTEXT: &str = "Rooter";
+
+fn init_kb(cx: &mut App) {
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([KeyBinding::new("cmd-w", CloseWindow, Some(APP_CONTEXT))]);
+
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([KeyBinding::new("cmd-q", Quit, Some(APP_CONTEXT))]);
+
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([KeyBinding::new("ctrl-w", CloseWindow, Some(APP_CONTEXT))]);
+
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([KeyBinding::new("alt-f4", Quit, Some(APP_CONTEXT))]);
+}
 
 pub struct Rooter {
+    focus_handle: FocusHandle,
+
     header_ui: Entity<HeaderUi>,
     login_ui: Entity<LoginUi>,
     home_ui: Entity<HomeUi>,
 
     auth: AuthState,
     auth_loading: bool,
-    user_state: UserState,
     session_state: Option<SessionState>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl Rooter {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(focus_handle: FocusHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let auth = cx.new(|cx| Auth::init(cx));
         let user_state = cx.new(|_| UserData::new());
         let nav = cx.new(|_| NavStack::new());
 
         let header_ui = HeaderUi::view(auth.clone(), user_state.clone(), nav.clone(), window, cx);
-        let login_ui = LoginUi::view(auth.clone(), user_state.clone(), window, cx);
+        let login_ui = LoginUi::view(auth.clone(), window, cx);
         let home_ui = HomeUi::view(auth.clone(), user_state.clone(), nav.clone(), window, cx);
-
-        let win_auth = auth.clone();
-        cx.on_window_closed(move |cx| {
-            win_auth.update(cx, |this, cx| {
-                this.save(cx);
-            });
-
-            if cx.windows().is_empty() {
-                cx.quit();
-            }
-        })
-        .detach();
 
         let auth_sub = cx.subscribe_in(&auth, window, |this, _, event, window, cx| {
             dbg!(event);
@@ -87,11 +91,11 @@ impl Rooter {
         });
 
         Self {
+            focus_handle,
             header_ui,
             login_ui,
             home_ui,
             auth,
-            user_state,
             auth_loading: false,
             session_state: None,
             _subscriptions: vec![auth_sub],
@@ -100,7 +104,12 @@ impl Rooter {
 
     pub fn view(window: &mut Window, cx: &mut App) -> Entity<Self> {
         cx.new(|cx| {
-            let root = Self::new(window, cx);
+            init_kb(cx);
+
+            let focus_handle = cx.focus_handle();
+            focus_handle.focus(window);
+
+            let root = Self::new(focus_handle, window, cx);
             root.setup_auth(window, cx);
             root
         })
@@ -177,10 +186,25 @@ impl Rooter {
             let inner = this
                 .read_with(cx, |this, cx| this.auth.read(cx).inner())
                 .unwrap();
+
             loop {
                 Timer::after(std::time::Duration::from_secs(40)).await;
 
+                let is_logged_out = this
+                    .read_with(cx, |this, _cx| {
+                        this.session_state
+                            .as_ref()
+                            .map(|s| matches!(s, SessionState::LoggedOut))
+                            .unwrap_or_default()
+                    })
+                    .unwrap_or_default();
+
+                if is_logged_out {
+                    continue;
+                }
+
                 let _inner = inner.clone();
+
                 let result = rt::spawn(cx, async move { _inner.fetch_token().await })
                     .unwrap()
                     .await
@@ -200,6 +224,12 @@ impl Rooter {
         })
         .detach();
     }
+
+    fn on_close_or_quit(&mut self, cx: &mut Context<Self>) {
+        self.auth.update(cx, |auth, cx| {
+            auth.save(cx);
+        });
+    }
 }
 
 impl Render for Rooter {
@@ -209,9 +239,17 @@ impl Render for Rooter {
         let sheet_layer = Root::render_sheet_layer(window, cx);
 
         div()
-            .on_action(|_: &CloseWindow, win, _| {
-                win.remove_window();
-            })
+            .id("rooter")
+            .key_context(APP_CONTEXT)
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                this.on_close_or_quit(cx);
+                window.remove_window();
+            }))
+            .on_action(cx.listener(|this, _: &Quit, _window, cx| {
+                this.on_close_or_quit(cx);
+                cx.quit();
+            }))
             .size_full()
             .child(self.header_ui.clone())
             .when(self.auth_loading, |d| {

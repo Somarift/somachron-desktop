@@ -41,7 +41,12 @@ fn main() {
         .run(|cx: &mut App| {
             let window_options = get_window_options(cx);
 
-            cx.bind_keys([KeyBinding::new("cmd-w", ui::CloseWindow, None)]);
+            cx.on_window_closed(|cx| {
+                if cx.windows().is_empty() {
+                    cx.quit();
+                }
+            })
+            .detach();
 
             let store = store::Store::load();
             cx.set_global(store);

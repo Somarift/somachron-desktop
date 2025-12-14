@@ -18,6 +18,11 @@ impl UserData {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.user_spaces.clear();
+        self.user = None;
+    }
+
     // pub fn current_space(&self, nav_ctx) -> Option<&SpaceResponse> {
     //     self.nav_stack.current_space().and_then(|sp_id| {
     //         self.user_spaces.iter().find_map(|us| {

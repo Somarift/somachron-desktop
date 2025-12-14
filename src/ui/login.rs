@@ -1,14 +1,13 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, Disableable, Icon, Sizable, StyledExt, WindowExt,
+    ActiveTheme, Disableable, Sizable, StyledExt, WindowExt,
     button::{Button, ButtonVariants},
     input::{Input, InputState, OtpInput, OtpState},
     notification::Notification,
 };
 
 use crate::{
-    auth::{Auth, AuthEvent, AuthState, SessionState},
-    ctx::UserState,
+    auth::{AuthEvent, AuthState, SessionState},
     rt,
     ui::_components::app_icon,
     util::MapAsync,
@@ -17,7 +16,6 @@ use crate::{
 
 pub struct LoginUi {
     auth: AuthState,
-    user_state: UserState,
     email_input: Entity<InputState>,
     otp_input: Entity<OtpState>,
     loading: bool,
@@ -26,12 +24,7 @@ pub struct LoginUi {
 }
 
 impl LoginUi {
-    fn new(
-        auth: AuthState,
-        user_state: UserState,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    fn new(auth: AuthState, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let email_input = cx.new(|cx| InputState::new(window, cx).placeholder("user@email.com"));
         let otp_input = cx.new(|cx| OtpState::new(6, window, cx));
 
@@ -48,7 +41,6 @@ impl LoginUi {
 
         Self {
             auth,
-            user_state,
             email_input,
             otp_input,
             loading: false,
@@ -57,13 +49,8 @@ impl LoginUi {
         }
     }
 
-    pub fn view(
-        auth: AuthState,
-        user_state: UserState,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Entity<Self> {
-        cx.new(|cx| Self::new(auth, user_state, window, cx))
+    pub fn view(auth: AuthState, window: &mut Window, cx: &mut App) -> Entity<Self> {
+        cx.new(|cx| Self::new(auth, window, cx))
     }
 
     fn sign_in(&self, window: &mut Window, cx: &mut Context<Self>) {

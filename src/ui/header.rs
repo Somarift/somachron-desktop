@@ -12,7 +12,7 @@ use gpui_component::{
 use uuid::Uuid;
 
 use crate::{
-    auth::AuthState,
+    auth::{AuthEvent, AuthState},
     ctx::UserState,
     nav::{NavEvent, NavState, Navigation},
     rt,
@@ -32,6 +32,7 @@ pub struct HeaderUi {
     user_state: UserState,
     nav: Navigation,
 
+    logged_in: bool,
     loading_spaces: bool,
     loading_user: bool,
     creating_space: bool,
@@ -51,8 +52,16 @@ impl HeaderUi {
             match event {
                 crate::auth::AuthEvent::Session(session_state) => match session_state {
                     crate::auth::SessionState::SignedIn => {
+                        this.logged_in = true;
+
                         this.fetch_user(window, cx);
                         this.fetch_spaces(None, window, cx);
+                    }
+                    crate::auth::SessionState::LoggedOut => {
+                        this.user_state.update(cx, |state, cx| {
+                            state.reset();
+                            cx.notify();
+                        });
                     }
                     _ => (),
                 },
@@ -77,6 +86,7 @@ impl HeaderUi {
             auth,
             user_state,
             nav,
+            logged_in: false,
             loading_spaces: false,
             loading_user: false,
             creating_space: false,
@@ -206,6 +216,31 @@ impl HeaderUi {
         })
         .detach();
     }
+
+    fn logout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let inner = self.auth.read(cx).inner();
+
+        let task = rt::spawn(cx, async move { inner.sign_out().await });
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await.flatten();
+
+            let _ = this.update_in(cx, |this, window, cx| {
+                match result {
+                    Ok(_) => this.auth.update(cx, |auth, cx| {
+                        auth.save(cx);
+                        cx.emit(AuthEvent::Session(crate::auth::SessionState::LoggedOut));
+                    }),
+                    Err(err) => window.push_notification(
+                        Notification::error(err.message).title("Failed to log out"),
+                        cx,
+                    ),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
 }
 
 impl create_space_dialog::CreateSpaceDialog for HeaderUi {
@@ -279,14 +314,18 @@ impl Render for HeaderUi {
             .top_0()
             .w_full()
             .child(self.render_nav_buttons(cx))
-            .child(self.render_space_switcher(cx))
+            .when(self.logged_in, |this| {
+                this.child(self.render_space_switcher(cx))
+            })
             .child(
                 div()
                     .pr(px(5.0))
                     .flex()
                     .gap_1()
                     .items_center()
-                    .child(self.render_user_popup(cx))
+                    .when(self.logged_in, |this| {
+                        this.child(self.render_user_popup(cx))
+                    })
                     .child(theme_toggle),
             )
     }
@@ -314,7 +353,7 @@ impl HeaderUi {
                             .placeholder(Icon::new(IconName::CircleUser))
                             .size_4(),
                     )
-                    .dropdown_menu(move |menu, _window, cx| {
+                    .dropdown_menu(move |menu, _window, _cx| {
                         let user = user.clone();
                         let entity = entity.clone();
 
@@ -361,7 +400,7 @@ impl HeaderUi {
                                         cx.stop_propagation();
 
                                         let _ = entity.update(cx, |this, cx| {
-                                            cx.notify();
+                                            this.logout(window, cx);
                                         });
                                     })
                             },
@@ -482,10 +521,10 @@ impl HeaderUi {
                         .icon(Icon::empty().path("icons/users.svg"))
                         .small()
                         .disabled(self.loading_spaces)
-                        .on_click(cx.listener(move |this, _ev, window, cx| {
+                        .on_click(cx.listener(move |_this, _ev, window, cx| {
                             let us = us.clone();
 
-                            window.open_sheet(cx, move |sheet, window, cx| {
+                            window.open_sheet(cx, move |sheet, _window, _cx| {
                                 sheet.child(
                                     v_flex()
                                         .gap_3()
@@ -508,50 +547,52 @@ impl HeaderUi {
             .flex()
             .items_center()
             .gap_0p5()
-            .child(
-                Button::new("go-back")
-                    .icon(Icon::new(IconName::ArrowLeft))
-                    .small()
-                    .ghost()
-                    .disabled(self.nav.read(cx).at_begining())
-                    .on_click(cx.listener(|this, _ev, window, cx| {
-                        cx.stop_propagation();
-                        window.close_sheet(cx);
+            .when(self.logged_in, |this| {
+                this.child(
+                    Button::new("go-back")
+                        .icon(Icon::new(IconName::ArrowLeft))
+                        .small()
+                        .ghost()
+                        .disabled(self.nav.read(cx).at_begining())
+                        .on_click(cx.listener(|this, _ev, window, cx| {
+                            cx.stop_propagation();
+                            window.close_sheet(cx);
 
-                        this.nav.update(cx, |stack, cx| {
-                            stack.back(cx);
-                        });
-                    })),
-            )
-            .child(
-                Button::new("go-forward")
-                    .icon(Icon::new(IconName::ArrowRight))
-                    .small()
-                    .ghost()
-                    .disabled(self.nav.read(cx).at_end())
-                    .on_click(cx.listener(|this, _ev, window, cx| {
-                        cx.stop_propagation();
-                        window.close_sheet(cx);
+                            this.nav.update(cx, |stack, cx| {
+                                stack.back(cx);
+                            });
+                        })),
+                )
+                .child(
+                    Button::new("go-forward")
+                        .icon(Icon::new(IconName::ArrowRight))
+                        .small()
+                        .ghost()
+                        .disabled(self.nav.read(cx).at_end())
+                        .on_click(cx.listener(|this, _ev, window, cx| {
+                            cx.stop_propagation();
+                            window.close_sheet(cx);
 
-                        this.nav.update(cx, |stack, cx| {
-                            stack.forward(cx);
-                        });
-                    })),
-            )
-            .child(
-                Button::new("refresh")
-                    .icon(Icon::empty().path("icons/rotate-ccw.svg"))
-                    .small()
-                    .ghost()
-                    .on_click(cx.listener(|this, _ev, window, cx| {
-                        cx.stop_propagation();
-                        window.close_sheet(cx);
+                            this.nav.update(cx, |stack, cx| {
+                                stack.forward(cx);
+                            });
+                        })),
+                )
+                .child(
+                    Button::new("refresh")
+                        .icon(Icon::empty().path("icons/rotate-ccw.svg"))
+                        .small()
+                        .ghost()
+                        .on_click(cx.listener(|this, _ev, window, cx| {
+                            cx.stop_propagation();
+                            window.close_sheet(cx);
 
-                        this.nav.update(cx, |_nav, cx| {
-                            cx.emit(NavEvent::Refresh);
-                        });
-                    })),
-            )
+                            this.nav.update(cx, |_nav, cx| {
+                                cx.emit(NavEvent::Refresh);
+                            });
+                        })),
+                )
+            })
             .child(
                 app_icon::comp(cx, |icon| icon.size_4())
                     .p_1()

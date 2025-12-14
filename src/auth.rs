@@ -66,6 +66,7 @@ impl Auth {
     }
 }
 
+#[allow(warnings)]
 #[derive(Clone)]
 struct AuthToken {
     token: String,
@@ -452,7 +453,9 @@ impl InnerAuth {
         store.cookies = cookies;
         store.client_id = client_id;
         store.session_id = session_id;
-        store.save()
+        store.save();
+
+        println!("saved data");
     }
 }
 
