@@ -55,6 +55,18 @@ impl Rooter {
         let login_ui = LoginUi::view(auth.clone(), window, cx);
         let home_ui = HomeUi::view(auth.clone(), user_state.clone(), nav.clone(), window, cx);
 
+        let _auth = auth.clone();
+        cx.on_window_closed(move |cx| {
+            _auth.update(cx, |auth, cx| {
+                auth.save(cx);
+                cx.notify();
+            });
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
+
         let auth_sub = cx.subscribe_in(&auth, window, |this, _, event, window, cx| {
             dbg!(event);
             match event {

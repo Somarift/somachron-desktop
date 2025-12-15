@@ -17,6 +17,30 @@ impl<T, E> MapAsync<T, E> for Result<T, E> {
     }
 }
 
+pub fn human_readable_size(bytes: i64) -> gpui::SharedString {
+    const UNITS: [&str; 9] = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
+
+    if bytes == 0 {
+        return gpui::SharedString::new_static("0 B");
+    }
+
+    let base = 1024_f64;
+    let exponent = (bytes as f64).log(base).floor() as usize;
+    let exponent = exponent.min(UNITS.len() - 1);
+
+    let size = bytes as f64 / base.powi(exponent as i32);
+
+    // Format with appropriate precision
+    if size >= 100.0 {
+        format!("{:.0} {}", size, UNITS[exponent])
+    } else if size >= 10.0 {
+        format!("{:.1} {}", size, UNITS[exponent])
+    } else {
+        format!("{:.2} {}", size, UNITS[exponent])
+    }
+    .into()
+}
+
 ///
 /// ------- Yanked from https://github.com/zed-industries/zed/blob/main/crates/client/src/telemetry.rs
 ///

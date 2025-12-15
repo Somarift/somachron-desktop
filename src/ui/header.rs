@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::{AuthEvent, AuthState},
-    ctx::UserState,
+    ctx::UserData,
     nav::{NavEvent, NavState, Navigation},
     rt,
     theme::*,
@@ -29,7 +29,7 @@ actions!([EmptyAction]);
 
 pub struct HeaderUi {
     auth: AuthState,
-    user_state: UserState,
+    user_data: Entity<UserData>,
     nav: Navigation,
 
     logged_in: bool,
@@ -43,7 +43,7 @@ pub struct HeaderUi {
 impl HeaderUi {
     pub fn new(
         auth: AuthState,
-        user_state: UserState,
+        user_data: Entity<UserData>,
         nav: Navigation,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -58,7 +58,7 @@ impl HeaderUi {
                         this.fetch_spaces(None, window, cx);
                     }
                     crate::auth::SessionState::LoggedOut => {
-                        this.user_state.update(cx, |state, cx| {
+                        this.user_data.update(cx, |state, cx| {
                             state.reset();
                             cx.notify();
                         });
@@ -84,7 +84,7 @@ impl HeaderUi {
 
         Self {
             auth,
-            user_state,
+            user_data,
             nav,
             logged_in: false,
             loading_spaces: false,
@@ -96,12 +96,12 @@ impl HeaderUi {
 
     pub fn view(
         auth: AuthState,
-        user_state: UserState,
+        user_data: Entity<UserData>,
         nav: Navigation,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| Self::new(auth, user_state, nav, window, cx))
+        cx.new(|cx| Self::new(auth, user_data, nav, window, cx))
     }
 
     fn change_mode(&mut self, _: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -137,7 +137,7 @@ impl HeaderUi {
             let _ = this.update_in(cx, |this, window, cx| {
                 this.loading_user = false;
                 match result {
-                    Ok(user) => this.user_state.update(cx, |ctx, _cx| ctx.user = Some(user)),
+                    Ok(user) => this.user_data.update(cx, |ctx, _cx| ctx.user = Some(user)),
                     Err(err) => window.push_notification(
                         Notification::error(err.message).title("Failed to fetch user"),
                         cx,
@@ -189,7 +189,7 @@ impl HeaderUi {
                                 stack.push(
                                     BrowseUi::view(
                                         this.auth.clone(),
-                                        this.user_state.clone(),
+                                        this.user_data.clone(),
                                         this.nav.clone(),
                                         NavState::new(user_space.space.id, user_space.folder),
                                         window,
@@ -200,7 +200,7 @@ impl HeaderUi {
                             });
                         }
 
-                        this.user_state
+                        this.user_data
                             .update(cx, |ctx, _cx| ctx.user_spaces = user_spaces);
                     }
 
@@ -341,7 +341,7 @@ impl HeaderUi {
             .small()
             .size_6()
             .ghost()
-            .map(|this| match self.user_state.read(cx).user.as_ref() {
+            .map(|this| match self.user_data.read(cx).user.as_ref() {
                 Some(user) => {
                     let user = user.clone();
 
@@ -413,7 +413,7 @@ impl HeaderUi {
 
     fn render_space_switcher(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let current_space = self.nav.read(cx).current_space_id().and_then(|sp_id| {
-            self.user_state
+            self.user_data
                 .read(cx)
                 .user_spaces
                 .iter()
@@ -472,7 +472,7 @@ impl HeaderUi {
                             let entity = entity.clone();
                             let user_spaces = entity
                                 .read_with(cx, |this, cx| {
-                                    this.user_state.read(cx).user_spaces.clone()
+                                    this.user_data.read(cx).user_spaces.clone()
                                 })
                                 .unwrap_or_default();
 
@@ -488,7 +488,7 @@ impl HeaderUi {
                                             this.nav.update(cx, |stack, cx| {
                                                 if let Some(current_space_id) =
                                                     stack.current_space_id()
-                                                    && current_space_id == &state.space_id
+                                                    && current_space_id == state.space_id()
                                                 {
                                                     // skip
                                                     return;
@@ -497,7 +497,7 @@ impl HeaderUi {
                                                 stack.push(
                                                     BrowseUi::view(
                                                         this.auth.clone(),
-                                                        this.user_state.clone(),
+                                                        this.user_data.clone(),
                                                         this.nav.clone(),
                                                         state,
                                                         window,

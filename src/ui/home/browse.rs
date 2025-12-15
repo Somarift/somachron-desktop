@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::AuthState,
-    ctx::UserState,
+    ctx::{FetchMedia, MediaData, UrlState, UserData},
     nav::{NavEvent, NavId, NavState, Navigation},
     rt,
     ui::{
@@ -23,28 +23,18 @@ use crate::{
             self, MEDIA_HEIGHT, RenderBounds, create_folder_dialog, delete_dialog, loading_icon,
         },
         header::EmptyAction,
+        home::media::MediaUi,
     },
     util::MapAsync,
     web::api::{
         self,
-        models::cloud::{
-            MediaType,
-            res::{FileMetaReponse, FolderResponse, StreamedUrlsResponse},
-        },
+        models::cloud::{MediaType, res::FolderResponse},
     },
 };
 
-#[derive(Debug, Clone)]
-enum MediaState {
-    Idle,
-    Queued,
-    Loaded(StreamedUrlsResponse),
-    Error,
-}
-
 pub struct BrowseUi {
     auth: AuthState,
-    user_state: UserState,
+    user_data: Entity<UserData>,
     nav: Navigation,
     render_bounds: Entity<RenderBounds>,
     image_cache: Entity<RetainAllImageCache>,
@@ -52,8 +42,7 @@ pub struct BrowseUi {
     current_nav: NavState,
     folder: Option<FolderResponse>,
     folders: Vec<FolderResponse>,
-    files: Vec<FileMetaReponse>,
-    media_states: Vec<MediaState>,
+    media_data: Entity<MediaData>,
     file_checked: HashSet<Uuid>,
 
     item_rows: Vec<Range<usize>>,
@@ -73,7 +62,7 @@ pub struct BrowseUi {
 impl BrowseUi {
     fn new(
         auth: AuthState,
-        user_state: UserState,
+        user_data: Entity<UserData>,
         nav: Navigation,
         current_nav: NavState,
         window: &mut Window,
@@ -81,6 +70,7 @@ impl BrowseUi {
     ) -> Self {
         let image_cache = RetainAllImageCache::new(cx);
 
+        let media_data = cx.new(|_cx| MediaData::new());
         let render_bounds = cx.new(|_cx| RenderBounds::new());
 
         let size_sub = cx.subscribe_in(
@@ -102,7 +92,7 @@ impl BrowseUi {
 
             if refresh {
                 if fetch_files {
-                    this.reset_state();
+                    this.reset_state(cx);
                     this.fetch_files(window, cx);
                 }
 
@@ -110,17 +100,21 @@ impl BrowseUi {
             }
         });
 
+        let media_sub = cx.subscribe_in(&media_data, window, |this, _entity, event, window, cx| {
+            let FetchMedia { file_id, index } = event;
+            this.fetch_image_urls(window, cx, *index, file_id.clone());
+        });
+
         Self {
             auth,
-            user_state,
+            user_data,
             nav,
             render_bounds,
             image_cache,
             current_nav,
             folder: None,
             folders: Vec::new(),
-            files: Vec::new(),
-            media_states: Vec::new(),
+            media_data,
             file_checked: HashSet::new(),
             item_rows: Vec::new(),
             visible_rows: 0,
@@ -132,30 +126,32 @@ impl BrowseUi {
             loading_files: false,
             creating_folder: false,
             deleting_folder: false,
-            _subscriptions: vec![size_sub, nav_sub],
+            _subscriptions: vec![size_sub, nav_sub, media_sub],
         }
     }
 
     pub fn view(
         auth: AuthState,
-        user_state: UserState,
+        user_data: Entity<UserData>,
         nav: Navigation,
         current_nav: NavState,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
         cx.new(|cx| {
-            let mut entity = Self::new(auth, user_state, nav, current_nav, window, cx);
+            let mut entity = Self::new(auth, user_data, nav, current_nav, window, cx);
             entity.fetch_folders(window, cx);
             entity.fetch_files(window, cx);
             entity
         })
     }
 
-    fn reset_state(&mut self) {
+    fn reset_state(&mut self, cx: &mut Context<Self>) {
         self.folders.clear();
-        self.files.clear();
-        self.media_states.clear();
+        self.media_data.update(cx, |md, cx| {
+            md.reset();
+            cx.notify();
+        });
         self.file_checked.clear();
         self.item_rows.clear();
         self.visible_rows = 0;
@@ -164,7 +160,8 @@ impl BrowseUi {
     }
 
     fn compute_visible_grid(this: &mut Self, cx: &mut Context<Self>) {
-        if this.files.is_empty() {
+        let files = this.media_data.read(cx).data();
+        if files.is_empty() {
             return;
         }
 
@@ -175,7 +172,7 @@ impl BrowseUi {
         let mut items_in_row = 0;
         this.item_rows = Vec::new();
 
-        for file in this.files.iter() {
+        for (file, _) in files.iter() {
             let fw = file.width as f32;
 
             if px(fw + used_w + 1.) > bounds.width {
@@ -189,7 +186,7 @@ impl BrowseUi {
                 items_in_row += 1;
             }
         }
-        this.item_rows.push(start..this.files.len());
+        this.item_rows.push(start..files.len());
 
         this.visible_rows = this
             .item_rows
@@ -252,8 +249,7 @@ impl BrowseUi {
 
     fn fetch_folders(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = self.current_nav.clone();
-        let space_id = state.space_id.clone();
-        let folder_id = state.folder_id.clone();
+        let _state = state.clone();
 
         let inner = self.auth.read(cx).inner();
 
@@ -263,7 +259,7 @@ impl BrowseUi {
                 .get_token()
                 .await
                 .map_async(async move |token| {
-                    api::cloud::list_folders(&token, &space_id.clone(), &folder_id.clone()).await
+                    api::cloud::list_folders(&token, _state.space_id(), _state.folder_id()).await
                 })
                 .await
         });
@@ -273,12 +269,7 @@ impl BrowseUi {
                 .get_token()
                 .await
                 .map_async(async move |token| {
-                    api::cloud::get_folder(
-                        &token,
-                        &state.space_id.clone(),
-                        &state.folder_id.clone(),
-                    )
-                    .await
+                    api::cloud::get_folder(&token, state.space_id(), state.folder_id()).await
                 })
                 .await
         });
@@ -332,12 +323,7 @@ impl BrowseUi {
                 .get_token()
                 .await
                 .map_async(async move |token| {
-                    api::cloud::list_files(
-                        &token,
-                        &state.space_id.clone(),
-                        &state.folder_id.clone(),
-                    )
-                    .await
+                    api::cloud::list_files(&token, state.space_id(), state.folder_id()).await
                 })
                 .await
         });
@@ -354,8 +340,11 @@ impl BrowseUi {
                 this.loading_files = false;
                 match files {
                     Ok(files) => {
-                        this.files = files;
-                        this.media_states = this.files.iter().map(|_| MediaState::Idle).collect();
+                        this.media_data.update(cx, |md, cx| {
+                            md.set_files(files);
+                            cx.notify();
+                        });
+
                         Self::compute_visible_grid(this, cx);
 
                         this.scroll_offset = px(-1.); // invalidate
@@ -376,27 +365,34 @@ impl BrowseUi {
     }
 
     fn fetch_image_urls(
-        this: &mut Self,
+        &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
         index: usize,
         file_id: Uuid,
     ) {
-        let nav_state = this.current_nav.clone();
+        let nav_state = self.current_nav.clone();
 
-        let Some(state) = this.media_states.get_mut(index) else {
-            return;
-        };
+        let queued_or_loaded = self.media_data.update(cx, |md, cx| {
+            if let Some((_, state)) = md.data_mut(index) {
+                match state {
+                    UrlState::Queued | UrlState::Loaded(_) => {
+                        return true;
+                    }
+                    _ => (),
+                };
 
-        match state {
-            MediaState::Queued | MediaState::Loaded(_) => {
-                return;
+                *state = UrlState::Queued;
+                cx.notify();
+
+                return false;
             }
-            _ => (),
-        };
+            true
+        });
 
-        *state = MediaState::Queued;
-        cx.notify();
+        if queued_or_loaded {
+            return;
+        }
 
         cx.spawn_in(window, async move |this, cx| {
             let inner = this
@@ -408,7 +404,7 @@ impl BrowseUi {
                     .get_token()
                     .await
                     .map_async(async move |token| {
-                        api::cloud::get_stream_urls(&token, &nav_state.space_id, &file_id).await
+                        api::cloud::get_stream_urls(&token, nav_state.space_id(), &file_id).await
                     })
                     .await
                     .unwrap()
@@ -419,14 +415,16 @@ impl BrowseUi {
             let _ = this.update_in(cx, |this, window, cx| {
                 match urls {
                     Ok(urls) => {
-                        this.media_states
-                            .get_mut(index)
-                            .map(|state| *state = MediaState::Loaded(urls));
+                        this.media_data.update(cx, |md, cx| {
+                            md.update_url(index, UrlState::Loaded(urls));
+                            cx.notify();
+                        });
                     }
                     Err(err) => {
-                        this.media_states
-                            .get_mut(index)
-                            .map(|state| *state = MediaState::Error);
+                        this.media_data.update(cx, |md, cx| {
+                            md.update_url(index, UrlState::Error);
+                            cx.notify();
+                        });
                         window.push_notification(
                             Notification::error(err.message).autohide(false),
                             cx,
@@ -437,6 +435,23 @@ impl BrowseUi {
             });
         })
         .detach();
+    }
+
+    fn open_media(this: &mut Self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        this.nav.update(cx, |nav, cx| {
+            nav.push(
+                MediaUi::view(
+                    this.current_nav.clone(),
+                    this.media_data.clone(),
+                    index,
+                    this.image_cache.clone(),
+                    window,
+                    cx,
+                ),
+                cx,
+            );
+            cx.notify();
+        });
     }
 }
 
@@ -452,8 +467,8 @@ impl create_folder_dialog::CreateFolderDialog for BrowseUi {
                 .map_async(async move |token| {
                     api::cloud::create_folder(
                         &token,
-                        &nav_state.space_id,
-                        &nav_state.folder_id,
+                        nav_state.space_id(),
+                        nav_state.folder_id(),
                         name.as_str().to_owned(),
                     )
                     .await
@@ -517,11 +532,11 @@ impl delete_dialog::DeleteDialog for BrowseUi {
                 .get_token()
                 .await
                 .map_async(async move |token| match fs {
-                    delete_dialog::DeleteType::File(uuid) => {
+                    delete_dialog::DeleteType::File(_uuid) => {
                         todo!()
                     }
                     delete_dialog::DeleteType::Folder(uuid) => {
-                        api::cloud::delete_folder(&token, &nav_state.space_id, &uuid).await
+                        api::cloud::delete_folder(&token, nav_state.space_id(), &uuid).await
                     }
                 })
                 .await
@@ -599,7 +614,7 @@ impl Render for BrowseUi {
                     .child(deferred(self.render_browse_status(cx)).with_priority(999))
                     // .child(self.render_folder_cards(cx))
                     .map(|this| {
-                        if self.files.is_empty() {
+                        if self.media_data.read(cx).data().is_empty() {
                             this.child(
                                 div().p_2().child(
                                     div()
@@ -658,7 +673,7 @@ impl BrowseUi {
                     h_flex()
                         .gap_2()
                         .child(Icon::new(IconName::GalleryVerticalEnd))
-                        .child(format!("{} items", self.folders.len() + self.files.len())),
+                        .child(format!("{} items", self.folders.len() + self.media_data.read(cx).data().len())),
                 ),
             )
             .child(
@@ -733,7 +748,7 @@ impl BrowseUi {
                                                 stack.push(
                                                     BrowseUi::view(
                                                         this.auth.clone(),
-                                                        this.user_state.clone(),
+                                                        this.user_data.clone(),
                                                         this.nav.clone(),
                                                         this.current_nav
                                                             .clone()
@@ -853,216 +868,187 @@ impl BrowseUi {
                     .size_full()
                     .overflow_y_scroll()
                     .p_2()
-                    .child(div().flex().flex_wrap().gap_1().pb_12().children(
-                        self.files.iter().cloned().enumerate().map(|(i, file)| {
-                            // let file_id = file.id.clone();
-                            // let file_name = file.file_name.clone();
+                    .child(
+                        div().flex().flex_wrap().gap_1().pb_12().children(
+                            self.media_data
+                                .read(cx)
+                                .data()
+                                .iter()
+                                .cloned()
+                                .enumerate()
+                                .map(|(i, (file, url_state))| {
+                                    let _file = file.clone();
+                                    // let file_name = file.file_name.clone();
 
-                            let this = cx.entity();
-                            // let entity = cx.weak_entity();
-                            if self.visible_item_range.contains(&i) {
-                                div()
-                                    .h(MEDIA_HEIGHT)
-                                    .w(px(file.width as f32))
-                                    .rounded_md()
-                                    .relative()
-                                    .group(SharedString::new(file.id.to_string()))
-                                    .flex_shrink_0()
-                                    .map(|this| {
-                                        if let Some(MediaState::Loaded(urls)) =
-                                            self.media_states.get(i).cloned()
-                                        {
-                                            this.child(
-                                                img(ImageSource::Resource(Resource::Uri(
-                                                    SharedUri::from(urls.thumbnail_stream),
-                                                )))
-                                                .image_cache(&self.image_cache)
-                                                .object_fit(ObjectFit::Cover)
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .id(SharedString::new(format!("{i}")))
-                                                .absolute()
-                                                .inset_0()
-                                                .h(MEDIA_HEIGHT)
-                                                .w(px(file.width as f32))
-                                                .rounded_md()
-                                                .overflow_hidden()
-                                                .with_loading(|| {
-                                                    loading_icon(|icon| icon.size_4())
-                                                        .into_any_element()
-                                                })
-                                                .border_1()
-                                                .border_color(cx.theme().sidebar_border)
-                                                .when(
-                                                    self.file_checked.contains(&file.id),
-                                                    |this| {
-                                                        this.border_2()
-                                                            .border_color(cx.theme().primary)
-                                                    },
-                                                ),
-                                            )
-                                            .when(
-                                                matches!(file.media_type, MediaType::Video),
-                                                |this| {
-                                                    this.child(
-                                                        div()
-                                                            .absolute()
-                                                            .inset_0()
-                                                            .size_full()
-                                                            .flex()
-                                                            .items_center()
-                                                            .justify_center()
-                                                            .child(
-                                                                div()
-                                                                    .p_2()
-                                                                    .rounded_full()
-                                                                    .bg(black().opacity(0.3))
-                                                                    .text_color(white())
-                                                                    .child(
-                                                                        Icon::empty()
-                                                                            .path("icons/play.svg"),
-                                                                    ),
-                                                            ),
-                                                    )
-                                                },
-                                            )
-                                        } else {
-                                            this.bg(cx.theme().muted)
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .child(loading_icon(|icon| icon.size_4()))
-                                        }
-                                    })
-                                    .child(
+                                    let this = cx.entity();
+                                    // let entity = cx.weak_entity();
+                                    if self.visible_item_range.contains(&i) {
                                         div()
-                                            .absolute()
-                                            .bottom_0()
-                                            .left_0()
-                                            .right_0()
-                                            .bg(black().opacity(0.3))
-                                            .rounded_b_md()
-                                            .text_color(white())
-                                            .text_sm()
-                                            .px_2()
-                                            .py_1()
-                                            .opacity(0.)
-                                            .group_hover(
-                                                SharedString::new(file.id.to_string()),
-                                                |el| el.opacity(100.),
-                                            )
-                                            .truncate()
-                                            .child(file.file_name.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .absolute()
-                                            .top_0()
-                                            .flex()
-                                            .w_full()
-                                            .items_center()
-                                            .justify_end()
+                                            .h(MEDIA_HEIGHT)
+                                            .w(px(file.width as f32))
+                                            .rounded_md()
+                                            .relative()
+                                            .group(SharedString::new(file.id.to_string()))
+                                            .flex_shrink_0()
                                             .map(|this| {
-                                                if !self.file_checked.contains(&file.id) {
-                                                    this.opacity(0.).group_hover(
-                                                        SharedString::new(file.id.to_string()),
-                                                        |el| el.opacity(100.),
+                                                if let UrlState::Loaded(urls) = url_state {
+                                                    this.child(
+                                                        img(ImageSource::Resource(Resource::Uri(
+                                                            SharedUri::from(&urls.thumbnail_stream),
+                                                        )))
+                                                        .image_cache(&self.image_cache)
+                                                        .object_fit(ObjectFit::Cover)
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .id(SharedString::new(format!("{i}")))
+                                                        .absolute()
+                                                        .inset_0()
+                                                        .h(MEDIA_HEIGHT)
+                                                        .w(px(file.width as f32))
+                                                        .rounded_md()
+                                                        .overflow_hidden()
+                                                        .with_loading(|| {
+                                                            loading_icon(|icon| icon.size_4())
+                                                                .into_any_element()
+                                                        })
+                                                        .border_1()
+                                                        .border_color(cx.theme().sidebar_border)
+                                                        .when(
+                                                            self.file_checked.contains(&file.id),
+                                                            |this| {
+                                                                this.border_2().border_color(
+                                                                    cx.theme().primary,
+                                                                )
+                                                            },
+                                                        )
+                                                        .on_click(cx.listener(
+                                                            move |this, _ev, window, cx| {
+                                                                Self::open_media(
+                                                                    this, i, window, cx,
+                                                                );
+                                                            },
+                                                        )),
+                                                    )
+                                                    .when(
+                                                        matches!(file.media_type, MediaType::Video),
+                                                        |this| {
+                                                            this.child(
+                                                            div()
+                                                                .absolute()
+                                                                .inset_0()
+                                                                .size_full()
+                                                                .flex()
+                                                                .items_center()
+                                                                .justify_center()
+                                                                .child(
+                                                                    div()
+                                                                        .p_2()
+                                                                        .rounded_full()
+                                                                        .bg(black().opacity(0.3))
+                                                                        .text_color(white())
+                                                                        .child(Icon::empty().path(
+                                                                            "icons/play.svg",
+                                                                        )),
+                                                                ),
+                                                        )
+                                                        },
                                                     )
                                                 } else {
-                                                    this
+                                                    this.bg(cx.theme().muted)
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .child(loading_icon(|icon| icon.size_4()))
                                                 }
                                             })
                                             .child(
-                                                Checkbox::new(SharedString::new(format!(
-                                                    "checkbox_{}",
-                                                    file.id
-                                                )))
-                                                .p_2()
-                                                .checked(self.file_checked.contains(&file.id))
-                                                .on_click(cx.listener(
-                                                    move |this, checked, _, cx| {
-                                                        if *checked {
-                                                            this.file_checked
-                                                                .insert(file.id.clone());
+                                                div()
+                                                    .absolute()
+                                                    .bottom_0()
+                                                    .left_0()
+                                                    .right_0()
+                                                    .bg(black().opacity(0.3))
+                                                    .rounded_b_md()
+                                                    .text_color(white())
+                                                    .text_sm()
+                                                    .px_2()
+                                                    .py_1()
+                                                    .opacity(0.)
+                                                    .group_hover(
+                                                        SharedString::new(file.id.to_string()),
+                                                        |el| el.opacity(100.),
+                                                    )
+                                                    .truncate()
+                                                    .child(file.file_name.clone()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .absolute()
+                                                    .top_0()
+                                                    .flex()
+                                                    .w_full()
+                                                    .items_center()
+                                                    .justify_end()
+                                                    .map(|this| {
+                                                        if !self.file_checked.contains(&file.id) {
+                                                            this.opacity(0.).group_hover(
+                                                                SharedString::new(
+                                                                    file.id.to_string(),
+                                                                ),
+                                                                |el| el.opacity(100.),
+                                                            )
                                                         } else {
-                                                            this.file_checked.remove(&file.id);
+                                                            this
                                                         }
-                                                        cx.notify();
-                                                    },
-                                                )), // div()
-                                                    //     .p_2()
-                                                    //     .rounded_full()
-                                                    //     .bg(black().opacity(0.3))
-                                                    //     .text_color(white())
-                                                    //     .child(Icon::empty().path("icons/play.svg")),
-                                            ),
-                                    )
-                                    .on_children_prepainted(move |_b, window, cx| {
-                                        this.update(cx, |this, cx| {
-                                            Self::fetch_image_urls(
-                                                this,
-                                                window,
-                                                cx,
-                                                i,
-                                                file.id.clone(),
-                                            );
-                                            cx.notify();
-                                        });
-                                    })
-                                // .context_menu(move |menu, _window, cx| {
-                                //     let file_name = file_name.clone();
-                                //     let entity = entity.clone();
+                                                    })
+                                                    .child(
+                                                        Checkbox::new(SharedString::new(format!(
+                                                            "checkbox_{}",
+                                                            file.id
+                                                        )))
+                                                        .p_2()
+                                                        .checked(
+                                                            self.file_checked.contains(&file.id),
+                                                        )
+                                                        .on_click(cx.listener(
+                                                            move |this, checked, _, cx| {
+                                                                cx.stop_propagation();
 
-                                //     menu.menu_element(
-                                //         Box::new(EmptyAction),
-                                //         move |_window, cx| {
-                                //             let file_name = file_name.clone();
-                                //             let entity = entity.clone();
-
-                                //             div()
-                                //                 .id("")
-                                //                 .flex()
-                                //                 .gap_2()
-                                //                 .items_center()
-                                //                 .text_color(cx.theme().danger)
-                                //                 .child(Icon::new(IconName::Delete).small())
-                                //                 .child(div().child("Delete file").text_sm())
-                                //                 .on_click(move |_ev, window, cx| {
-                                //                     println!("clicked!");
-
-                                //                     let file_name = file_name.clone();
-                                //                     let entity = entity.clone();
-
-                                //                     window.open_dialog(
-                                //                         cx,
-                                //                         move |dialog, _window, cx| {
-                                //                             delete_dialog::comp(
-                                //                                 dialog,
-                                //                                 entity.clone(),
-                                //                                 delete_dialog::DeleteType::File(
-                                //                                     file_id.clone(),
-                                //                                 ),
-                                //                                 file_name.clone(),
-                                //                                 cx,
-                                //                             )
-                                //                         },
-                                //                     );
-                                //                 })
-                                //         },
-                                //     )
-                                // })
-                            } else {
-                                div()
-                                    .h(MEDIA_HEIGHT)
-                                    .w(px(file.width as f32))
-                                    .rounded_md()
-                                    .bg(cx.theme().sidebar)
-                                    .child(file.file_name)
-                                // .context_menu(move |menu, _window, _cx| menu)
-                            }
-                        }),
-                    ))
+                                                                if *checked {
+                                                                    this.file_checked
+                                                                        .insert(file.id.clone());
+                                                                } else {
+                                                                    this.file_checked
+                                                                        .remove(&file.id);
+                                                                }
+                                                                cx.notify();
+                                                            },
+                                                        )),
+                                                    ),
+                                            )
+                                            .on_children_prepainted(move |_b, window, cx| {
+                                                this.update(cx, |this, cx| {
+                                                    this.fetch_image_urls(
+                                                        window,
+                                                        cx,
+                                                        i,
+                                                        _file.id.clone(),
+                                                    );
+                                                    cx.notify();
+                                                });
+                                            })
+                                    } else {
+                                        div()
+                                            .h(MEDIA_HEIGHT)
+                                            .w(px(file.width as f32))
+                                            .rounded_md()
+                                            .bg(cx.theme().sidebar)
+                                            .child(file.file_name.clone())
+                                    }
+                                }),
+                        ),
+                    )
                     .child({
                         let this = cx.entity();
                         canvas(

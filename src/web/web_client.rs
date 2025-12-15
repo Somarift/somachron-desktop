@@ -51,7 +51,7 @@ pub(super) fn make_http_client() -> reqwest::Client {
             map.insert(http::header::USER_AGENT, user_agent.clone());
             map
         })
-        .use_rustls_tls()
+        // .use_rustls_tls()
         .tcp_nodelay(true)
         .connect_timeout(std::time::Duration::from_secs(30))
         .build()

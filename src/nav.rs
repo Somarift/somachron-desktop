@@ -8,9 +8,17 @@ pub trait NavId: Render + 'static {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ViewType {
+    Browse,
+    Media,
+    Gallery,
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NavState {
-    pub space_id: Uuid,
-    pub folder_id: Uuid,
+    space_id: Uuid,
+    folder_id: Uuid,
+    ty: ViewType,
 }
 
 impl NavState {
@@ -18,11 +26,25 @@ impl NavState {
         Self {
             space_id,
             folder_id,
+            ty: ViewType::Browse,
         }
+    }
+
+    pub fn space_id(&self) -> &Uuid {
+        &self.space_id
+    }
+
+    pub fn folder_id(&self) -> &Uuid {
+        &self.folder_id
     }
 
     pub fn with_folder(mut self, folder_id: Uuid) -> Self {
         self.folder_id = folder_id;
+        self
+    }
+
+    pub fn for_media(mut self) -> Self {
+        self.ty = ViewType::Media;
         self
     }
 }

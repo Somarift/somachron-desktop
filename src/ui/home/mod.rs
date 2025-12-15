@@ -6,7 +6,7 @@ use gpui_component::{
 
 use crate::{
     auth::AuthState,
-    ctx::UserState,
+    ctx::UserData,
     nav::{NavEvent, NavState, Navigation},
     rt,
     ui::{
@@ -18,12 +18,13 @@ use crate::{
 };
 
 pub(super) mod browse;
+mod media;
 
 actions!(user, [MyAction, SignOut]);
 
 pub struct HomeUi {
     auth: AuthState,
-    user_state: UserState,
+    user_data: Entity<UserData>,
     nav: Navigation,
 
     loading_sidebar: bool,
@@ -34,14 +35,14 @@ pub struct HomeUi {
 impl HomeUi {
     fn new(
         auth: AuthState,
-        user_state: UserState,
+        user_data: Entity<UserData>,
         nav: Navigation,
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Self {
         Self {
             auth,
-            user_state,
+            user_data,
             nav,
             loading_sidebar: false,
             creating_space: false,
@@ -51,12 +52,12 @@ impl HomeUi {
 
     pub fn view(
         auth: AuthState,
-        user_state: UserState,
+        user_data: Entity<UserData>,
         nav: Navigation,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| Self::new(auth, user_state, nav, window, cx))
+        cx.new(|cx| Self::new(auth, user_data, nav, window, cx))
     }
 }
 
@@ -171,7 +172,7 @@ impl HomeUi {
                         .gap_2()
                         .child(loading_icon(|icon| icon.size_5())),
                 )
-            } else if self.user_state.read(cx).user_spaces.is_empty() {
+            } else if self.user_data.read(cx).user_spaces.is_empty() {
                 this.child(
                     div()
                         .flex()
@@ -210,7 +211,7 @@ impl HomeUi {
                         .child(create_space_dialog::trigger(cx.weak_entity()).small()),
                 )
                 .child(div().flex().flex_wrap().gap_2().children(
-                    self.user_state.read(cx).user_spaces.iter().map(|m| {
+                    self.user_data.read(cx).user_spaces.iter().map(|m| {
                         let space_name = m.space.name.clone();
                         let space_description = if m.space.description.is_empty() {
                             String::from("No description")
@@ -277,7 +278,7 @@ impl HomeUi {
                                     stack.push(
                                         BrowseUi::view(
                                             this.auth.clone(),
-                                            this.user_state.clone(),
+                                            this.user_data.clone(),
                                             this.nav.clone(),
                                             NavState::new(space_id.clone(), folder_id.clone()),
                                             window,
