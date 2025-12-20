@@ -1,9 +1,11 @@
-[package]
-name = "somachron-desktop"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["crates/somachron-desktop"]
+default-members = ["crates/somachron-desktop"]
+resolver = "3"
 
-[dependencies]
+[workspace.dependencies]
+somachron-desktop = { path = "crates/somachron-desktop" }
+
 gpui = { version = "0.2.2" }
 gpui-component = { version = "0.5" }
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
@@ -25,10 +27,10 @@ dirs = "6.0.0"
 reqwest = { version = "0.12", features = ["json", "stream", "multipart", "rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+# [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = "0.3"
 
-[target.'cfg(target_os = "windows")'.dependencies]
+# [workspace.dependencies.windows]
 windows = "0.62"
 
 # smallvec is included here for convenience, it is used by gpui when creating

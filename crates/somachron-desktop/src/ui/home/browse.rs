@@ -626,7 +626,6 @@ impl Render for BrowseUi {
                         this.child(self.render_selections(cx))
                     })
                     .child(deferred(self.render_browse_status(cx)).with_priority(999))
-                    // .child(self.render_folder_cards(cx))
                     .map(|this| {
                         if self.media_state.read(cx).view_list().is_empty() {
                             this.child(
