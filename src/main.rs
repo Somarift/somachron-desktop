@@ -5,9 +5,8 @@ use gpui_component::{ActiveTheme, TitleBar};
 
 mod assets;
 mod auth;
-mod ctx;
+mod entities;
 mod err;
-mod nav;
 mod rt;
 mod store;
 mod theme;

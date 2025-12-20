@@ -4,8 +4,7 @@ use header::HeaderUi;
 
 use crate::{
     auth::{Auth, AuthClientEvent, AuthEvent, AuthState, SessionState},
-    ctx::UserData,
-    nav::NavStack,
+    entities::{UserData, nav::NavStack},
     rt,
     ui::{home::HomeUi, login::LoginUi},
 };
@@ -225,9 +224,7 @@ impl Rooter {
                 if let Err(err) = result {
                     let _ = this.update_in(cx, |_this, window, cx| {
                         window.push_notification(
-                            Notification::error(err.message)
-                                .title("Failed to refresh auth")
-                                .autohide(false),
+                            Notification::error(err.message).title("Failed to refresh auth"),
                             cx,
                         );
                     });

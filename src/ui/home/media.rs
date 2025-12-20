@@ -5,45 +5,84 @@ use gpui_component::{
 };
 
 use crate::{
-    ctx::{FetchMedia, MediaData, UrlState},
-    nav::{NavId, NavState},
+    entities::{
+        media::{FetchMedia, MediaAssetState, MediaState, PreviewAssetType},
+        nav::{NavId, NavState},
+    },
     ui::_components::loading_icon,
-    util,
 };
 
+actions!(media, [Left, Right]);
+const MEDIA_CONTEXT: &str = "Media";
+
+fn init_kb(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("left", Left, Some(MEDIA_CONTEXT))]);
+    cx.bind_keys([KeyBinding::new("right", Right, Some(MEDIA_CONTEXT))]);
+}
+
 pub struct MediaUi {
+    focus_handle: FocusHandle,
     current_nav: NavState,
-    media_data: Entity<MediaData>,
+    media_data: Entity<MediaState>,
     ptr: usize,
-    image_cache: Entity<RetainAllImageCache>,
 }
 
 impl MediaUi {
     fn new(
+        focus_handle: FocusHandle,
         current_nav: NavState,
-        media_data: Entity<MediaData>,
+        media_data: Entity<MediaState>,
         ptr: usize,
-        image_cache: Entity<RetainAllImageCache>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
     ) -> Self {
         Self {
+            focus_handle,
             current_nav: current_nav.for_media(),
             media_data,
             ptr,
-            image_cache,
         }
     }
 
     pub fn view(
         current_nav: NavState,
-        media_data: Entity<MediaData>,
+        media_data: Entity<MediaState>,
         ptr: usize,
-        image_cache: Entity<RetainAllImageCache>,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| Self::new(current_nav, media_data, ptr, image_cache, window, cx))
+        cx.new(|cx| {
+            init_kb(cx);
+
+            let fh = cx.focus_handle();
+            fh.focus(window);
+
+            Self::new(fh, current_nav, media_data, ptr, window, cx)
+        })
+    }
+
+    fn left(&mut self, cx: &mut Context<Self>) {
+        self.media_data.update(cx, |md, cx| {
+            let index = self.ptr.checked_sub(1).unwrap_or(self.ptr);
+
+            if let Some(file) = md.get_file(self.ptr) {
+                self.ptr = index;
+                cx.emit(FetchMedia { file });
+            }
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    fn right(&mut self, cx: &mut Context<Self>) {
+        self.media_data.update(cx, |md, cx| {
+            if let Some(file) = md.get_file(self.ptr + 1) {
+                self.ptr += 1;
+                cx.emit(FetchMedia { file });
+            }
+            cx.notify();
+        });
+        cx.notify();
     }
 }
 
@@ -55,8 +94,15 @@ impl NavId for MediaUi {
 
 impl Render for MediaUi {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // div().flex().flex_col().size_full().child(
         div()
+            .key_context(MEDIA_CONTEXT)
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &Left, _window, cx| {
+                this.left(cx);
+            }))
+            .on_action(cx.listener(|this, _: &Right, _window, cx| {
+                this.right(cx);
+            }))
             .flex()
             .flex_col()
             .size_full()
@@ -73,29 +119,34 @@ impl Render for MediaUi {
                             .h_full()
                             .ghost()
                             .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.media_data.update(cx, |md, cx| {
-                                    let index = this.ptr.checked_sub(1).unwrap_or(this.ptr);
-
-                                    if let Some(id) = md.get(this.ptr).map(|(file, _)| file.id) {
-                                        this.ptr = index;
-                                        cx.emit(FetchMedia {
-                                            file_id: id,
-                                            index: this.ptr,
-                                        });
-                                    }
-                                    cx.notify();
-                                });
+                                this.left(cx);
                             })),
                     )
                     .when_some(
-                        self.media_data.update(cx, |md, _cx| md.get(self.ptr)),
-                        |this, (file, url)| {
-                            if let UrlState::Loaded(url) = url {
-                                match file.media_type {
-                                    crate::web::api::models::cloud::MediaType::Image => {
+                        self.media_data.read_with(cx, |md, _cx| {
+                            md.get_file(self.ptr)
+                                .and_then(|f| md.asset(&f.id).cloned().map(|asset| (f, asset)))
+                        }),
+                        |this, (file, asset_state)| {
+                            if let MediaAssetState::Loaded {
+                                preview_asset_ty, ..
+                            } = asset_state.clone()
+                            {
+                                match preview_asset_ty {
+                                    PreviewAssetType::Loading => this
+                                        .child(
+                                            div()
+                                                .size_full()
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .child(loading_icon(|icon| icon.size_8())),
+                                        )
+                                        .size_full(),
+                                    PreviewAssetType::Preview(path_buf) => {
                                         this.child(
-                                            img(ImageSource::Resource(Resource::Uri(
-                                                SharedUri::from(&url.original_stream),
+                                            img(ImageSource::Resource(Resource::Path(
+                                                path_buf.into(),
                                             )))
                                             .id(SharedString::new(format!("{}", file.id)))
                                             .size_full()
@@ -112,7 +163,7 @@ impl Render for MediaUi {
                                             }),
                                         )
                                     }
-                                    crate::web::api::models::cloud::MediaType::Video => {
+                                    PreviewAssetType::VideoUrl(_) => {
                                         this.child(div().child("Video")).size_full()
                                     }
                                 }
@@ -127,51 +178,29 @@ impl Render for MediaUi {
                             .h_full()
                             .ghost()
                             .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.media_data.update(cx, |md, cx| {
-                                    if let Some(id) = md.get(this.ptr + 1).map(|(file, _)| file.id)
-                                    {
-                                        this.ptr += 1;
-                                        cx.emit(FetchMedia {
-                                            file_id: id,
-                                            index: this.ptr,
-                                        });
-                                    }
-                                    cx.notify();
-                                });
+                                this.right(cx);
                             })),
                     ),
             )
-            .when_some(
-                self.media_data.update(cx, |md, cx| md.get(self.ptr)),
-                |this, (file, _)| {
-                    this.child(
-                        deferred(
-                            div()
-                                .px_2()
-                                .py_1p5()
-                                .absolute()
-                                .bottom_0()
-                                .w_full()
-                                .flex()
-                                .flex_shrink_0()
-                                .border_t_1()
-                                .border_color(cx.theme().sidebar_border)
-                                .gap_4()
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(file.file_name.clone()),
-                                ),
-                        )
-                        .with_priority(999),
+            .when_some(self.media_data.read(cx).get_file(self.ptr), |this, file| {
+                this.child(
+                    deferred(
+                        div()
+                            .px_2()
+                            .py_1p5()
+                            .absolute()
+                            .bottom_0()
+                            .w_full()
+                            .flex()
+                            .flex_shrink_0()
+                            .border_t_1()
+                            .border_color(cx.theme().sidebar_border)
+                            .bg(cx.theme().sidebar)
+                            .gap_4()
+                            .child(div().text_xs().child(file.file_name.clone())),
                     )
-                },
-            )
-        // )
-        // .when_some(
-        //     self.media_data.update(cx, |md, cx| md.get(self.ptr)),
-        //     |this, (file, url)| this.child(file.file_name.clone()),
-        // )
+                    .with_priority(999),
+                )
+            })
     }
 }

@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MediaType {
     Image,
@@ -25,6 +25,7 @@ pub mod res {
     #[derive(Debug, Deserialize, Clone)]
     pub struct FileMetaReponse {
         pub id: Uuid,
+        pub updated_at: DateTime<Utc>,
 
         pub file_name: String,
         pub media_type: super::MediaType,
@@ -34,9 +35,8 @@ pub mod res {
     }
 
     #[derive(Debug, Deserialize, Clone)]
-    pub struct StreamedUrlsResponse {
-        pub original_stream: String,
-        pub thumbnail_stream: String,
+    pub struct StreamedUrlResponse {
+        pub url: String,
     }
 }
 

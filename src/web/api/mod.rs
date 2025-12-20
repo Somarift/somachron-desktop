@@ -1,6 +1,7 @@
-use std::sync::LazyLock;
+use std::{path::PathBuf, sync::LazyLock};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::err::AppError;
@@ -23,6 +24,35 @@ static API_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| super::make_http
 pub struct EmptyResponse {
     pub status: u16,
     pub message: String,
+}
+
+pub async fn download(url: String, dst: PathBuf) -> Result<PathBuf, AppError> {
+    let res = API_CLIENT
+        .get(url)
+        .send()
+        .await
+        .map_err(|err| AppError::err(err))?;
+
+    let status = res.status();
+
+    if status.is_success() {
+        let bytes = res.bytes().await.map_err(|err| AppError::err(err))?;
+        let mut file = tokio::fs::File::create(&dst)
+            .await
+            .map_err(|err| AppError::err(err))?;
+        file.write_all(bytes.as_ref())
+            .await
+            .map_err(|err| AppError::err(err))?;
+
+        return Ok(dst);
+    }
+
+    let text = res.text().await.map_err(|err| AppError::err(err))?;
+    Err(AppError {
+        status: status.as_u16(),
+        message: text,
+        req_id: "".into(),
+    })
 }
 
 async fn get<R: DeserializeOwned + Send + 'static>(

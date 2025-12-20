@@ -3,7 +3,7 @@ use std::{collections::HashMap, fs::File, io::Read};
 use gpui::{App, Global};
 use serde::{Deserialize, Serialize};
 
-mod paths;
+pub mod paths;
 
 const APP_SETTINGS: &str = "settings.json";
 

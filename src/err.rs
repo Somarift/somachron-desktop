@@ -63,7 +63,11 @@ impl AppError {
 
         Self {
             status: 500,
-            message: format!("{} - {:?}", err, source),
+            message: format!(
+                "{} - {}",
+                err,
+                source.map(|s| format!("{s}")).unwrap_or_default()
+            ),
             req_id: "".into(),
         }
     }

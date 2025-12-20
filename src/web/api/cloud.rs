@@ -2,7 +2,7 @@ use uuid::Uuid;
 
 use crate::web::api::{
     EmptyResponse,
-    models::cloud::{req::CreateFolderRequest, res::StreamedUrlsResponse},
+    models::cloud::{req::CreateFolderRequest, res::StreamedUrlResponse},
 };
 
 use super::{
@@ -34,11 +34,19 @@ pub async fn get_folder(
     super::get(format!("/media/d/{folder_id}"), token, Some(space_id)).await
 }
 
-pub async fn get_stream_urls(
+pub async fn get_thumbnail_stream_url(
     token: &str,
     space_id: &Uuid,
     file_id: &Uuid,
-) -> Result<StreamedUrlsResponse, AppError> {
+) -> Result<StreamedUrlResponse, AppError> {
+    super::get(format!("/media/stream/th/{file_id}"), token, Some(space_id)).await
+}
+
+pub async fn get_preview_stream_url(
+    token: &str,
+    space_id: &Uuid,
+    file_id: &Uuid,
+) -> Result<StreamedUrlResponse, AppError> {
     super::get(format!("/media/stream/{file_id}"), token, Some(space_id)).await
 }
 

@@ -6,8 +6,8 @@ use gpui_component::{
 
 use crate::{
     auth::AuthState,
-    ctx::UserData,
-    nav::{NavEvent, NavState, Navigation},
+    entities::UserData,
+    entities::nav::{NavEvent, NavState, Navigation},
     rt,
     ui::{
         _components::{create_space_dialog, loading_icon},

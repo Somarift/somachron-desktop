@@ -1,15 +1,17 @@
+use std::sync::Arc;
+
 use gpui::*;
 use gpui_component::{ActiveTheme, Icon, IconName, StyledExt, dialog::Dialog, v_flex};
 
 use crate::{
-    nav::NavState, ui::_components::create_space_dialog,
+    entities::nav::NavState, ui::_components::create_space_dialog,
     web::api::models::space::res::UserSpaceResponse,
 };
 
 pub fn comp<T: create_space_dialog::CreateSpaceDialog + 'static>(
     dialog: Dialog,
     entity: WeakEntity<T>,
-    user_spaces: Vec<UserSpaceResponse>,
+    user_spaces: Vec<Arc<UserSpaceResponse>>,
     cx: &mut App,
     on_space_select: impl Fn(WeakEntity<T>, NavState, &mut Window, &mut App) + Clone + 'static,
 ) -> Dialog {

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable, StyledExt, ThemeMode, TitleBar,
@@ -13,8 +15,10 @@ use uuid::Uuid;
 
 use crate::{
     auth::{AuthEvent, AuthState},
-    ctx::UserData,
-    nav::{NavEvent, NavState, Navigation},
+    entities::{
+        UserData,
+        nav::{NavEvent, NavState, Navigation},
+    },
     rt,
     theme::*,
     ui::{
@@ -200,8 +204,9 @@ impl HeaderUi {
                             });
                         }
 
-                        this.user_data
-                            .update(cx, |ctx, _cx| ctx.user_spaces = user_spaces);
+                        this.user_data.update(cx, |ctx, _cx| {
+                            ctx.user_spaces = user_spaces.into_iter().map(Arc::new).collect()
+                        });
                     }
 
                     Err(err) => window.push_notification(
