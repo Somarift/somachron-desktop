@@ -8,6 +8,9 @@ gpui = { version = "0.2.2" }
 gpui-component = { version = "0.5" }
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
 anyhow = "1"
 serde = "1"
 serde_json = "1"

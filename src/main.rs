@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use gpui::*;
 use gpui_component::{ActiveTheme, TitleBar};
+use tracing::Level;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod assets;
 mod auth;
@@ -34,6 +36,11 @@ fn get_window_options(cx: &mut App) -> WindowOptions {
 }
 
 fn main() {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::from_default_env().add_directive(Level::INFO.into()))
+        .with(tracing_subscriber::fmt::layer().with_thread_ids(true))
+        .init();
+
     Application::new()
         .with_assets(assets::AppAssets)
         .with_http_client(Arc::new(web::WebClient::new()))

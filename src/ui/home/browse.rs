@@ -30,7 +30,6 @@ use crate::{
         _components::{self, create_folder_dialog, delete_dialog, loading_icon},
         header::EmptyAction,
         home::media::MediaUi,
-        // home::media::MediaUi,
     },
     util::MapAsync,
     web::api::{
@@ -688,9 +687,15 @@ impl BrowseUi {
                     h_flex()
                         .gap_2()
                         .child(Icon::new(IconName::GalleryVerticalEnd))
-                        .child(format!("{} items", self.folders.len() + self.media_state.read(cx).view_list().len())),
+                        .child(format!(
+                            "{} items",
+                            self.folders.len() + self.media_state.read(cx).view_list().len()
+                        )),
                 ),
             )
+            .when(!self.media_state.read(cx).sections().is_empty(), |this| {
+                this.child(self.render_sidebar_timelies(cx))
+            })
             .child(
                 SidebarGroup::new("Folders").child(SidebarMenu::new().when_else(
                     self.loading_folders,
@@ -707,74 +712,7 @@ impl BrowseUi {
                             |el| el.child(SidebarMenuItem::new("No folders")),
                             |el| {
                                 el.children(self.folders.iter().map(|folder| {
-                                    let folder_id = folder.id.clone();
-                                    let folder_path = folder.path.clone();
-                                    let entity = cx.weak_entity();
-
-                                    SidebarMenuItem::new(&folder.name)
-                                        .icon(Icon::new(IconName::Folder))
-                                        .suffix(
-                                            Button::new("")
-                                                .icon(IconName::EllipsisVertical)
-                                                .small()
-                                                .ghost()
-                                                .on_click(move |_ev, _window, cx| {
-                                                    cx.stop_propagation();
-                                                })
-                                                .dropdown_menu(move |menu, _window, _cx| {
-                                                    let folder_path = folder_path.clone();
-                                                    let entity = entity.clone();
-
-                                                    menu.menu_element(
-                                                        Box::new(EmptyAction),
-                                                        move |_window, cx| {
-                                                            let folder_path = folder_path.clone();
-                                                            let entity = entity.clone();
-
-                                                            div()
-                                                                .id("")
-                                                                .flex()
-                                                                .gap_2()
-                                                                .items_center()
-                                                                .text_color(cx.theme().danger)
-                                                                .child(
-                                                                    Icon::new(IconName::Delete)
-                                                                        .small(),
-                                                                )
-                                                                .child(
-                                                                    div()
-                                                                        .child("Delete folder")
-                                                                        .text_sm(),
-                                                                )
-                                                                .on_click(move |_ev, window, cx| {
-                                                                    let folder_path = folder_path.clone();
-                                                                    let entity = entity.clone();
-
-                                                                    window.open_dialog(cx, move |dialog, _window, cx| {
-                                                                        delete_dialog::comp(dialog, entity.clone(), delete_dialog::DeleteType::Folder(folder_id.clone()), folder_path.clone(), cx)
-                                                                    });
-                                                                })
-                                                        },
-                                                    )
-                                                }),
-                                        )
-                                        .on_click(cx.listener(move |this, _ev, window, cx| {
-                                            this.nav.update(cx, |stack, cx| {
-                                                stack.push(
-                                                    BrowseUi::view(
-                                                        this.auth.clone(),
-                                                        this.user_data.clone(),
-                                                        this.nav.clone(),
-                                                        this.current_nav
-                                                            .clone()
-                                                            .with_folder(folder_id),
-                                                        window,
-                                                        cx,
-                                                    ),
-                                                    cx,
-                                                );
-                                            });
-                                        }))
+                                    Self::render_sidebar_folder_item(folder.clone(), cx)
                                 }))
                             },
                         )
@@ -787,6 +725,132 @@ impl BrowseUi {
                     .small()
                     .disabled(self.loading_folders),
             )
+    }
+
+    fn render_sidebar_timelies(&self, cx: &Context<Self>) -> SidebarGroup<SidebarMenu> {
+        let sections = self.media_state.read(cx).sections();
+        let entity = cx.weak_entity();
+
+        SidebarGroup::new("Dates").child(
+            SidebarMenu::new().child(
+                SidebarMenuItem::new("Times")
+                    .icon(IconName::Calendar)
+                    .suffix(
+                        Button::new("td")
+                            .icon(IconName::ChevronRight)
+                            .small()
+                            .ghost()
+                            .on_click(move |_ev, _window, cx| {
+                                cx.stop_propagation();
+                            })
+                            .dropdown_menu(move |menu, _window, _cx| {
+                                let mut menu = menu.scrollable(true);
+
+                                for (date, offset) in sections.iter().cloned() {
+                                    let entity = entity.clone();
+
+                                    menu = menu.menu_element(
+                                        Box::new(EmptyAction),
+                                        move |_window, _cx| {
+                                            let entity = entity.clone();
+
+                                            div()
+                                                .id("")
+                                                .flex()
+                                                .gap_2()
+                                                .items_center()
+                                                .child(Icon::empty().path("icons/clock.svg"))
+                                                .child(
+                                                    div()
+                                                        .child(
+                                                            date.format("%a, %B %d, %Y")
+                                                                .to_string(),
+                                                        )
+                                                        .text_sm(),
+                                                )
+                                                .on_click(move |_ev, _window, cx| {
+                                                    let entity = entity.clone();
+
+                                                    let _ = entity.update(cx, |this, cx| {
+                                                        this.files_scroll_handle.set_offset(
+                                                            Point::new(px(0.), offset.negate()),
+                                                        );
+                                                        cx.notify();
+                                                    });
+                                                })
+                                        },
+                                    );
+                                }
+                                menu
+                            }),
+                    ),
+            ),
+        )
+    }
+
+    fn render_sidebar_folder_item(folder: FolderResponse, cx: &Context<Self>) -> SidebarMenuItem {
+        let folder_id = folder.id.clone();
+        let folder_path = folder.path.clone();
+        let entity = cx.weak_entity();
+
+        SidebarMenuItem::new(&folder.name)
+            .icon(Icon::new(IconName::Folder))
+            .suffix(
+                Button::new("")
+                    .icon(IconName::EllipsisVertical)
+                    .small()
+                    .ghost()
+                    .on_click(move |_ev, _window, cx| {
+                        cx.stop_propagation();
+                    })
+                    .dropdown_menu(move |menu, _window, _cx| {
+                        let folder_path = folder_path.clone();
+                        let entity = entity.clone();
+
+                        menu.menu_element(Box::new(EmptyAction), move |_window, cx| {
+                            let folder_path = folder_path.clone();
+                            let entity = entity.clone();
+
+                            div()
+                                .id("")
+                                .flex()
+                                .gap_2()
+                                .items_center()
+                                .text_color(cx.theme().danger)
+                                .child(Icon::new(IconName::Delete).small())
+                                .child(div().child("Delete folder").text_sm())
+                                .on_click(move |_ev, window, cx| {
+                                    let folder_path = folder_path.clone();
+                                    let entity = entity.clone();
+
+                                    window.open_dialog(cx, move |dialog, _window, cx| {
+                                        delete_dialog::comp(
+                                            dialog,
+                                            entity.clone(),
+                                            delete_dialog::DeleteType::Folder(folder_id.clone()),
+                                            folder_path.clone(),
+                                            cx,
+                                        )
+                                    });
+                                })
+                        })
+                    }),
+            )
+            .on_click(cx.listener(move |this, _ev, window, cx| {
+                this.nav.update(cx, |stack, cx| {
+                    stack.push(
+                        BrowseUi::view(
+                            this.auth.clone(),
+                            this.user_data.clone(),
+                            this.nav.clone(),
+                            this.current_nav.clone().with_folder(folder_id),
+                            window,
+                            cx,
+                        ),
+                        cx,
+                    );
+                });
+            }))
     }
 
     fn render_browse_status(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -899,14 +963,11 @@ impl BrowseUi {
                                         .px_2()
                                         .flex()
                                         .items_center()
-                                        .justify_center()
                                         .flex_grow()
                                         .w_full()
-                                        .bg(cx.theme().primary)
                                         .rounded_md()
                                         .font_semibold()
                                         .text_sm()
-                                        .text_color(cx.theme().primary_foreground)
                                         .child(date.format("%a, %B %d, %Y").to_string()),
                                 }),
                         ),
@@ -1067,7 +1128,6 @@ impl BrowseUi {
                         ),
                 )
                 .on_children_prepainted(move |_b, window, cx| {
-                    // println!("prepaint: {}", _file.file_name);
                     this.update(cx, |this, cx| {
                         this.fetch_image_urls(window, cx, _file.clone());
                         cx.notify();

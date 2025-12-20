@@ -20,7 +20,7 @@ impl AppError {
         let data = res
             .json::<super::web::api::EmptyResponse>()
             .await
-            .map_err(Self::err)?;
+            .map_err(|err| Self::err(err))?;
 
         Ok(Self {
             status: data.status,
@@ -34,13 +34,16 @@ impl AppError {
         let message = message.into();
 
         let location = std::panic::Location::caller();
-        // log::error!(
-        //     "Error [{}:{}:{}]: {}",
-        //     location.file(),
-        //     location.line(),
-        //     location.column(),
-        //     message,
-        // );
+        tracing::error!(
+            msg = "Error",
+            location = format!(
+                "{}:{}:{}",
+                location.file(),
+                location.line(),
+                location.column()
+            ),
+            error = message,
+        );
 
         Self {
             status: 400,
@@ -51,41 +54,22 @@ impl AppError {
 
     #[track_caller]
     pub fn err(err: impl std::error::Error) -> Self {
-        let source = err.source();
+        let source = err.source().map(|s| format!("{s}")).unwrap_or_default();
         let location = std::panic::Location::caller();
-        // log::error!(
-        //     "Error [{}:{}:{}]: {}",
-        //     location.file(),
-        //     location.line(),
-        //     location.column(),
-        //     err
-        // );
-
-        Self {
-            status: 500,
-            message: format!(
-                "{} - {}",
-                err,
-                source.map(|s| format!("{s}")).unwrap_or_default()
+        tracing::error!(
+            msg = format!("Error: {err}"),
+            location = format!(
+                "{}:{}:{}",
+                location.file(),
+                location.line(),
+                location.column()
             ),
-            req_id: "".into(),
-        }
-    }
-
-    #[track_caller]
-    pub fn gp_err(err: anyhow::Error) -> Self {
-        let location = std::panic::Location::caller();
-        // log::error!(
-        //     "Error [{}:{}:{}]: {}",
-        //     location.file(),
-        //     location.line(),
-        //     location.column(),
-        //     err
-        // );
+            error = source,
+        );
 
         Self {
             status: 500,
-            message: format!("{}", err),
+            message: format!("{err} - {source}"),
             req_id: "".into(),
         }
     }

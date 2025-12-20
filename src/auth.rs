@@ -40,6 +40,25 @@ pub enum AuthEvent {
     Session(SessionState),
 }
 
+impl std::fmt::Display for AuthEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthEvent::Client(event) => match event {
+                AuthClientEvent::Loading => write!(f, "Client::Loading"),
+                AuthClientEvent::Setup(result) => match result {
+                    Ok(_) => write!(f, "Client::Setup::Ok"),
+                    Err(err) => write!(f, "Client::Setup:Err: {}", err.message),
+                },
+            },
+            AuthEvent::Session(state) => match state {
+                SessionState::Validating => write!(f, "Session::Validating"),
+                SessionState::SignedIn => write!(f, "Session::SignedIn"),
+                SessionState::LoggedOut => write!(f, "Session::LoggedOut"),
+            },
+        }
+    }
+}
+
 pub type AuthState = Entity<Auth>;
 
 pub struct Auth {
@@ -455,7 +474,7 @@ impl InnerAuth {
         store.session_id = session_id;
         store.save();
 
-        println!("saved data");
+        tracing::info!(msg = "Saved data");
     }
 }
 

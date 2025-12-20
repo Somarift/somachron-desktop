@@ -67,7 +67,7 @@ impl Rooter {
         .detach();
 
         let auth_sub = cx.subscribe_in(&auth, window, |this, _, event, window, cx| {
-            dbg!(event);
+            tracing::info!(msg = "Auth event", event = format!("{event}"));
             match event {
                 AuthEvent::Client(client_event) => match client_event {
                     AuthClientEvent::Loading => {

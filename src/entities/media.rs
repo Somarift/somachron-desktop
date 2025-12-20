@@ -48,6 +48,7 @@ pub struct MediaState {
     view_list: Vec<ElementType>,
     asset_states: HashMap<Uuid, MediaAssetState>,
     visible_grid: Vec<(Pixels, Range<usize>)>,
+    sections: Arc<Vec<(Arc<NaiveDate>, Pixels)>>,
 }
 
 impl MediaState {
@@ -56,11 +57,16 @@ impl MediaState {
             view_list: Vec::new(),
             asset_states: HashMap::new(),
             visible_grid: Vec::new(),
+            sections: Arc::new(Vec::new()),
         }
     }
 
     pub fn view_list(&self) -> &Vec<ElementType> {
         &self.view_list
+    }
+
+    pub fn sections(&self) -> Arc<Vec<(Arc<NaiveDate>, Pixels)>> {
+        self.sections.clone()
     }
 
     pub fn get_file(&self, index: usize) -> Option<Arc<FileMetaReponse>> {
@@ -110,7 +116,6 @@ impl MediaState {
             self.view_list.extend(
                 files
                     .into_iter()
-                    .rev()
                     .map(|file| ElementType::File(Arc::new(file))),
             );
         }
@@ -122,6 +127,7 @@ impl MediaState {
         }
 
         self.visible_grid = Vec::new();
+        let mut sections = Vec::new();
 
         let mut start = 0;
         let mut used_height = px(0.);
@@ -142,12 +148,14 @@ impl MediaState {
                         used_width += fw + 4.;
                     }
                 }
-                ElementType::Section(_) => {
+                ElementType::Section(date) => {
                     used_height += px(38.);
                     if i > 0 {
                         used_height += MEDIA_HEIGHT + px(4.);
                     }
                     self.visible_grid.push((used_height, start..i));
+                    sections.push((date.clone(), used_height - px(38.)));
+
                     start = i + 1;
                     used_width = 16.;
                 }
@@ -157,6 +165,8 @@ impl MediaState {
         used_height += MEDIA_HEIGHT + px(4.);
         self.visible_grid
             .push((used_height, start..self.view_list.len()));
+
+        self.sections = Arc::new(sections);
     }
 
     pub fn get_initial_visible_range(&self, bounds: &super::bounds::RenderBounds) -> Range<usize> {
@@ -196,6 +206,7 @@ impl MediaState {
     }
 
     pub fn clear(&mut self) {
+        self.sections = Arc::new(Vec::new());
         self.view_list.clear();
         self.asset_states.clear();
         self.visible_grid.clear();
