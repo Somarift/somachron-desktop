@@ -1,11 +1,11 @@
 [package]
-name = "somachron-desktop"
+name = "somachron"
 version = "0.1.0"
 edition = "2024"
 publish = false
 
 [[bin]]
-name = "somachron-desktop"
+name = "somachron"
 path = "src/main.rs"
 
 [dependencies]
