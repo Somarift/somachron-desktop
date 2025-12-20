@@ -65,7 +65,7 @@ impl MediaUi {
         self.media_data.update(cx, |md, cx| {
             let index = self.ptr.checked_sub(1).unwrap_or(self.ptr);
 
-            if let Some(file) = md.get_file(self.ptr) {
+            if let Some((index, file)) = md.get_prev_file(index) {
                 self.ptr = index;
                 cx.emit(FetchMedia { file });
             }
@@ -76,8 +76,8 @@ impl MediaUi {
 
     fn right(&mut self, cx: &mut Context<Self>) {
         self.media_data.update(cx, |md, cx| {
-            if let Some(file) = md.get_file(self.ptr + 1) {
-                self.ptr += 1;
+            if let Some((index, file)) = md.get_next_file(self.ptr + 1) {
+                self.ptr = index;
                 cx.emit(FetchMedia { file });
             }
             cx.notify();

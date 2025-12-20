@@ -76,6 +76,40 @@ impl MediaState {
         })
     }
 
+    pub fn get_next_file(&self, mut index: usize) -> Option<(usize, Arc<FileMetaReponse>)> {
+        let mut iter = self.view_list.iter();
+        match iter.nth(index) {
+            Some(ElementType::File(file)) => Some((index, file.clone())),
+            _ => {
+                while let Some(element) = iter.next() {
+                    index += 1;
+                    if let ElementType::File(file) = element {
+                        return Some((index, file.clone()));
+                    }
+                }
+
+                return None;
+            }
+        }
+    }
+
+    pub fn get_prev_file(&self, mut index: usize) -> Option<(usize, Arc<FileMetaReponse>)> {
+        let mut iter = self.view_list.iter();
+        match iter.nth(index) {
+            Some(ElementType::File(file)) => Some((index, file.clone())),
+            _ => {
+                while let Some(element) = iter.next_back() {
+                    index = index.checked_sub(1).unwrap_or(index);
+                    if let ElementType::File(file) = element {
+                        return Some((index, file.clone()));
+                    }
+                }
+
+                return None;
+            }
+        }
+    }
+
     pub fn asset_mut(&mut self, asset_id: &Uuid) -> Option<&mut MediaAssetState> {
         self.asset_states.get_mut(asset_id)
     }
