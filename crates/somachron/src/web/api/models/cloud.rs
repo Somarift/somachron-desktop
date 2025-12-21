@@ -19,7 +19,7 @@ pub mod res {
         pub created_at: DateTime<Utc>,
         pub updated_at: DateTime<Utc>,
 
-        pub name: String,
+        pub name: SharedString,
         pub path: String,
     }
 

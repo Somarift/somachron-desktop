@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ops::Range, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, ops::Range, path::PathBuf, sync::Arc};
 
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
@@ -52,7 +52,7 @@ pub struct BrowseUi {
     folder: Option<FolderResponse>,
     folders: Vec<FolderResponse>,
     media_state: Entity<MediaState>,
-    file_checked: HashSet<Uuid>,
+    file_checked: HashMap<Uuid, SharedString>,
 
     visible_item_range: Range<usize>,
     files_scroll_handle: ScrollHandle,
@@ -61,7 +61,7 @@ pub struct BrowseUi {
     loading_folders: bool,
     loading_files: bool,
     creating_folder: bool,
-    deleting_folder: bool,
+    deleting: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -87,18 +87,9 @@ impl BrowseUi {
         );
 
         let nav_sub = cx.subscribe_in(&nav, window, |this, _entity, event, window, cx| {
-            let (refresh, fetch_files) = match event {
-                NavEvent::Refresh => (true, true),
-                NavEvent::RefreshView(nav_state) => (true, &this.current_nav == nav_state),
-                _ => (false, false),
-            };
-
-            if refresh {
-                if fetch_files {
-                    this.reset_state(cx);
-                    this.fetch_files(window, cx);
-                }
-
+            if let NavEvent::Refresh = event {
+                this.reset_state(cx);
+                this.fetch_files(window, cx);
                 this.fetch_folders(window, cx);
             }
         });
@@ -118,14 +109,14 @@ impl BrowseUi {
             folder: None,
             folders: Vec::new(),
             media_state,
-            file_checked: HashSet::new(),
+            file_checked: HashMap::new(),
             visible_item_range: 0..0,
             files_scroll_handle: ScrollHandle::new(),
             header_scroll_handle: ScrollHandle::new(),
             loading_folders: false,
             loading_files: false,
             creating_folder: false,
-            deleting_folder: false,
+            deleting: false,
             _subscriptions: vec![size_sub, nav_sub, media_sub],
         }
     }
@@ -562,11 +553,31 @@ impl delete_dialog::DeleteDialog for BrowseUi {
                 .get_token()
                 .await
                 .map_async(async move |token| match fs {
-                    delete_dialog::DeleteType::File(_uuid) => {
-                        todo!()
+                    delete_dialog::DeleteType::File(uuids) => {
+                        let mut err_message = String::from("");
+
+                        for (file_id, name) in uuids.into_iter() {
+                            let result =
+                                api::cloud::delete_file(&token, nav_state.space_id(), &file_id)
+                                    .await;
+                            if let Err(err) = result {
+                                err_message.push_str(name.as_str());
+                                err_message.push_str(": ");
+                                err_message.push_str(&err.message);
+                                err_message.push_str("\n");
+                            }
+                        }
+
+                        if err_message.is_empty() {
+                            Ok(())
+                        } else {
+                            Err(AppError::message(err_message))
+                        }
                     }
-                    delete_dialog::DeleteType::Folder(uuid) => {
-                        api::cloud::delete_folder(&token, nav_state.space_id(), &uuid).await
+                    delete_dialog::DeleteType::Folder((uuid, _)) => {
+                        api::cloud::delete_folder(&token, nav_state.space_id(), &uuid)
+                            .await
+                            .map(|_| ())
                     }
                 })
                 .await
@@ -574,14 +585,14 @@ impl delete_dialog::DeleteDialog for BrowseUi {
 
         cx.spawn_in(window, async move |this, cx| {
             let _ = this.update(cx, |this, cx| {
-                this.deleting_folder = true;
+                this.deleting = true;
                 cx.notify();
             });
 
             let result = task.await.flatten();
 
             let _ = this.update_in(cx, |this, window, cx| {
-                this.deleting_folder = false;
+                this.deleting = false;
 
                 match result {
                     Ok(_) => {
@@ -589,11 +600,11 @@ impl delete_dialog::DeleteDialog for BrowseUi {
 
                         match fs_id {
                             delete_dialog::DeleteType::File(_) => {
-                                this.nav.update(cx, |_nav, cx| {
-                                    cx.emit(NavEvent::RefreshView(this.current_nav.clone()));
-                                });
+                                this.reset_state(cx);
+                                this.fetch_files(window, cx);
+                                this.fetch_folders(window, cx);
                             }
-                            delete_dialog::DeleteType::Folder(folder_id) => {
+                            delete_dialog::DeleteType::Folder((folder_id, _)) => {
                                 this.fetch_folders(window, cx);
 
                                 this.nav.update(cx, |nav, cx| {
@@ -617,7 +628,7 @@ impl delete_dialog::DeleteDialog for BrowseUi {
     }
 
     fn is_loading(&self) -> bool {
-        self.deleting_folder
+        self.deleting
     }
 }
 
@@ -807,7 +818,7 @@ impl BrowseUi {
 
     fn render_sidebar_folder_item(folder: FolderResponse, cx: &Context<Self>) -> SidebarMenuItem {
         let folder_id = folder.id.clone();
-        let folder_path = folder.path.clone();
+        let folder_name = folder.name.clone();
         let entity = cx.weak_entity();
 
         SidebarMenuItem::new(&folder.name)
@@ -821,11 +832,11 @@ impl BrowseUi {
                         cx.stop_propagation();
                     })
                     .dropdown_menu(move |menu, _window, _cx| {
-                        let folder_path = folder_path.clone();
+                        let folder_name = folder_name.clone();
                         let entity = entity.clone();
 
                         menu.menu_element(Box::new(EmptyAction), move |_window, cx| {
-                            let folder_path = folder_path.clone();
+                            let folder_name = folder_name.clone();
                             let entity = entity.clone();
 
                             div()
@@ -837,15 +848,17 @@ impl BrowseUi {
                                 .child(Icon::new(IconName::Delete).small())
                                 .child(div().child("Delete folder").text_sm())
                                 .on_click(move |_ev, window, cx| {
-                                    let folder_path = folder_path.clone();
+                                    let folder_name = folder_name.clone();
                                     let entity = entity.clone();
 
                                     window.open_dialog(cx, move |dialog, _window, cx| {
                                         delete_dialog::comp(
                                             dialog,
                                             entity.clone(),
-                                            delete_dialog::DeleteType::Folder(folder_id.clone()),
-                                            folder_path.clone(),
+                                            delete_dialog::DeleteType::Folder((
+                                                folder_id.clone(),
+                                                folder_name.clone(),
+                                            )),
                                             cx,
                                         )
                                     });
@@ -945,7 +958,30 @@ impl BrowseUi {
                     .icon(IconName::Delete)
                     .label(format!("Delete {} files", self.file_checked.len()))
                     .small()
-                    .disabled(self.loading_folders),
+                    .disabled(self.loading_folders)
+                    .on_click(cx.listener(|this, _ev, window, cx| {
+                        let entity = cx.weak_entity();
+
+                        this.media_state.read(cx).view_list();
+
+                        window.open_dialog(cx, move |dialog, _window, cx| {
+                            let ty = entity
+                                .read_with(cx, |this, _cx| {
+                                    this.file_checked
+                                        .iter()
+                                        .map(|(id, name)| (id.clone(), name.clone()))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+
+                            delete_dialog::comp(
+                                dialog,
+                                entity.clone(),
+                                delete_dialog::DeleteType::File(ty),
+                                cx,
+                            )
+                        });
+                    })),
             )
     }
 
@@ -1054,7 +1090,7 @@ impl BrowseUi {
                                 })
                                 .border_1()
                                 .border_color(cx.theme().sidebar_border)
-                                .when(self.file_checked.contains(&file.id), |this| {
+                                .when(self.file_checked.contains_key(&file.id), |this| {
                                     this.border_2().border_color(cx.theme().primary)
                                 })
                                 .on_click(cx.listener(move |this, _ev, window, cx| {
@@ -1119,7 +1155,7 @@ impl BrowseUi {
                         .items_center()
                         .justify_end()
                         .map(|this| {
-                            if !self.file_checked.contains(&file.id) {
+                            if !self.file_checked.contains_key(&file.id) {
                                 this.opacity(0.)
                                     .group_hover(SharedString::new(file.id.to_string()), |el| {
                                         el.opacity(100.)
@@ -1131,12 +1167,13 @@ impl BrowseUi {
                         .child(
                             Checkbox::new(SharedString::new(format!("checkbox_{}", file.id)))
                                 .p_2()
-                                .checked(self.file_checked.contains(&file.id))
+                                .checked(self.file_checked.contains_key(&file.id))
                                 .on_click(cx.listener(move |this, checked, _, cx| {
                                     cx.stop_propagation();
 
                                     if *checked {
-                                        this.file_checked.insert(file.id.clone());
+                                        this.file_checked
+                                            .insert(file.id.clone(), file.file_name.clone());
                                     } else {
                                         this.file_checked.remove(&file.id);
                                     }

@@ -82,3 +82,11 @@ pub async fn delete_folder(
 ) -> Result<EmptyResponse, AppError> {
     super::delete(format!("/media/rm/{folder_id}"), &token, Some(space_id)).await
 }
+
+pub async fn delete_file(
+    token: &str,
+    space_id: &Uuid,
+    file_id: &Uuid,
+) -> Result<EmptyResponse, AppError> {
+    super::delete(format!("/media/rmf/{file_id}"), &token, Some(space_id)).await
+}

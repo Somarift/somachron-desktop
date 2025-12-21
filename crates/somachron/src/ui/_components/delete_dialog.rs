@@ -1,4 +1,4 @@
-use gpui::*;
+use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt, WindowExt,
     button::{Button, ButtonVariants},
@@ -10,15 +10,15 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub enum DeleteType {
-    File(Uuid),
-    Folder(Uuid),
+    File(Vec<(Uuid, SharedString)>),
+    Folder((Uuid, SharedString)),
 }
 
 impl DeleteType {
     pub fn get_type(&self) -> &'static str {
         match self {
-            DeleteType::File(_) => "file",
-            DeleteType::Folder(_) => "folder",
+            DeleteType::File(_) => "file(s)",
+            DeleteType::Folder(_) => "folder(s)",
         }
     }
 
@@ -39,15 +39,14 @@ pub trait DeleteDialog: Sized {
 pub fn comp<T: DeleteDialog + 'static>(
     dialog: Dialog,
     entity: WeakEntity<T>,
-    fs_id: DeleteType,
-    item_description: String,
+    deletion_ty: DeleteType,
     cx: &mut App,
 ) -> Dialog {
     let is_loading = entity
         .read_with(cx, |this, _cx| this.is_loading())
         .unwrap_or_default();
 
-    let deletion_type = fs_id.get_type();
+    let deletion_type = deletion_ty.get_type();
 
     let _entity = entity.clone();
 
@@ -65,23 +64,26 @@ pub fn comp<T: DeleteDialog + 'static>(
                 .child(Label::new(format!(
                     "The following {deletion_type} will be deleted. Are you sure to continue ?",
                 )))
-                .child(
-                    div()
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .bg(cx.theme().sidebar)
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(fs_id.get_icon().small())
-                        .text_sm()
-                        .child(item_description),
-                ),
+                .map(|this| match deletion_ty.clone() {
+                    DeleteType::File(uuids) => this.children(uuids.iter().map(|(_, name)| {
+                        div()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .bg(cx.theme().sidebar)
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(deletion_ty.get_icon().small())
+                            .text_sm()
+                            .child(Label::new(name))
+                    })),
+                    DeleteType::Folder((_, name)) => this.child(Label::new(name)),
+                }),
         )
         .footer(move |_, _, _, _| {
             let entity = _entity.clone();
-            let fs_id = fs_id.clone();
+            let del_ty = deletion_ty.clone();
 
             let cancel = Button::new("cancel_delete_fs")
                 .label("Cancel")
@@ -97,7 +99,7 @@ pub fn comp<T: DeleteDialog + 'static>(
                 .loading(is_loading)
                 .on_click(move |_ev, window, cx| {
                     let _ = entity.clone().update(cx, |this, cx| {
-                        this.delete(fs_id.clone(), window, cx);
+                        this.delete(del_ty.clone(), window, cx);
                     });
                 });
 
