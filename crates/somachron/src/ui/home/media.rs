@@ -38,7 +38,7 @@ impl MediaUi {
     ) -> Self {
         Self {
             focus_handle,
-            current_nav: current_nav.for_media(),
+            current_nav,
             media_data,
             ptr,
         }
@@ -57,7 +57,7 @@ impl MediaUi {
             let fh = cx.focus_handle();
             fh.focus(window);
 
-            Self::new(fh, current_nav, media_data, ptr, window, cx)
+            Self::new(fh, current_nav.for_media(), media_data, ptr, window, cx)
         })
     }
 

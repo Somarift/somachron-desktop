@@ -12,6 +12,8 @@ use uuid::Uuid;
 use crate::web::api::models::cloud::res::FileMetaReponse;
 
 pub const MEDIA_HEIGHT: Pixels = px(176.);
+pub const MEDIA_GAP: Pixels = px(4.);
+pub const SECTION_HEIGHT: Pixels = px(36.);
 
 pub struct FetchMedia {
     pub file: Arc<FileMetaReponse>,
@@ -164,39 +166,43 @@ impl MediaState {
         let mut sections = Vec::new();
 
         let mut start = 0;
-        let mut used_height = px(0.);
-        let mut used_width = 16f32;
+        let mut used_height = SECTION_HEIGHT + MEDIA_GAP;
+        let mut used_width = px(0.);
+        let bounded_width = bounds.width - px(16.);
 
-        for (i, element) in self.view_list.iter().enumerate() {
+        for (i, element) in self.view_list.iter().enumerate().skip(1) {
             match element {
                 ElementType::File(file) => {
-                    let fw = file.width as f32;
+                    let fw = px(file.width as f32);
 
-                    if px(fw + 4. + used_width) > bounds.width {
-                        used_height += MEDIA_HEIGHT + px(4.);
+                    if (MEDIA_GAP + fw + used_width) > bounded_width {
+                        used_height += MEDIA_HEIGHT + MEDIA_GAP;
                         self.visible_grid.push((used_height, start..i));
 
                         start = i;
-                        used_width = 16. + fw + 4.;
+                        used_width = fw;
                     } else {
-                        used_width += fw + 4.;
+                        if used_width.is_zero() {
+                            used_width += fw;
+                        } else {
+                            used_width += MEDIA_GAP + fw;
+                        }
                     }
                 }
                 ElementType::Section(date) => {
-                    used_height += px(38.);
-                    if i > 0 {
-                        used_height += MEDIA_HEIGHT + px(4.);
-                    }
+                    used_height += MEDIA_HEIGHT + MEDIA_GAP;
                     self.visible_grid.push((used_height, start..i));
-                    sections.push((date.clone(), used_height - px(38.)));
+
+                    sections.push((date.clone(), used_height));
+                    used_height += SECTION_HEIGHT + MEDIA_GAP;
 
                     start = i + 1;
-                    used_width = 16.;
+                    used_width = px(0.);
                 }
             };
         }
 
-        used_height += MEDIA_HEIGHT + px(4.);
+        used_height += MEDIA_HEIGHT + MEDIA_GAP;
         self.visible_grid
             .push((used_height, start..self.view_list.len()));
 
@@ -220,6 +226,10 @@ impl MediaState {
     }
 
     pub fn get_visible_state(&self, scroll_offset: Pixels, end_offset: Pixels) -> Range<usize> {
+        if self.visible_grid.is_empty() {
+            return 0..0;
+        }
+
         let (start_index, start) = self
             .visible_grid
             .iter()

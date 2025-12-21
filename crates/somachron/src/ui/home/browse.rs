@@ -19,7 +19,8 @@ use crate::{
         UserData,
         bounds::RenderBounds,
         media::{
-            ElementType, FetchMedia, MEDIA_HEIGHT, MediaAssetState, MediaState, PreviewAssetType,
+            ElementType, FetchMedia, MEDIA_GAP, MEDIA_HEIGHT, MediaAssetState, MediaState,
+            PreviewAssetType, SECTION_HEIGHT,
         },
         nav::{NavEvent, NavId, NavState, Navigation},
     },
@@ -138,7 +139,7 @@ impl BrowseUi {
         cx: &mut App,
     ) -> Entity<Self> {
         cx.new(|cx| {
-            let mut entity = Self::new(auth, user_data, nav, current_nav, window, cx);
+            let mut entity = Self::new(auth, user_data, nav, current_nav.for_browse(), window, cx);
             entity.fetch_folders(window, cx);
             entity.fetch_files(window, cx);
             entity
@@ -147,6 +148,7 @@ impl BrowseUi {
 
     fn reset_state(&mut self, cx: &mut Context<Self>) {
         self.folders.clear();
+        self.folder = None;
         self.media_state.update(cx, |ms, cx| {
             ms.clear();
             cx.notify();
@@ -337,12 +339,13 @@ impl BrowseUi {
                 _file.updated_at.timestamp_millis()
             ));
 
-            if _file.media_type == MediaType::Image && thumbnail_file.exists() {
+            if thumbnail_file.exists() {
                 return Ok(thumbnail_file);
             }
 
             let file_id = _file.id.clone();
-            inner
+            let th_path = thumbnail_file.clone();
+            let result = inner
                 .get_token()
                 .await
                 .map_async(async move |token| {
@@ -350,8 +353,14 @@ impl BrowseUi {
                         .await
                 })
                 .await
-                .map_async(async move |urls| api::download(urls.url, thumbnail_file).await)
-                .await
+                .map_async(async move |urls| api::download(urls.url, th_path).await)
+                .await;
+
+            if let Err(_) = result {
+                let _ = tokio::fs::remove_file(&thumbnail_file).await;
+            }
+
+            result
         });
 
         cx.spawn_in(window, async move |this, cx| {
@@ -411,7 +420,8 @@ impl BrowseUi {
             }
 
             let file_id = _file.id.clone();
-            inner
+            let pr_path = preview_file.clone();
+            let result = inner
                 .get_token()
                 .await
                 .map_async(async move |token| {
@@ -419,12 +429,18 @@ impl BrowseUi {
                 })
                 .await
                 .map_async(async move |urls| match _file.media_type {
-                    MediaType::Image => api::download(urls.url, preview_file)
+                    MediaType::Image => api::download(urls.url, pr_path)
                         .await
                         .map(PreviewAssetType::Preview),
                     MediaType::Video => Ok(PreviewAssetType::VideoUrl(urls.url)),
                 })
-                .await
+                .await;
+
+            if let Err(_) = result {
+                let _ = tokio::fs::remove_file(&preview_file).await;
+            }
+
+            result
         });
 
         cx.spawn_in(window, async move |this, cx| {
@@ -719,10 +735,12 @@ impl BrowseUi {
                 )),
             )
             .footer(
-                create_folder_dialog::trigger(cx.weak_entity())
-                    .w_full()
-                    .small()
-                    .disabled(self.loading_folders),
+                div().flex().w_full().gap_2().child(
+                    create_folder_dialog::trigger(cx.weak_entity())
+                        .flex_1()
+                        .small()
+                        .disabled(self.loading_folders),
+                ),
             )
     }
 
@@ -948,7 +966,7 @@ impl BrowseUi {
                     .p_2()
                     .pb_12()
                     .child(
-                        div().flex().flex_wrap().gap_1().children(
+                        div().flex().flex_wrap().gap(MEDIA_GAP).children(
                             self.media_state
                                 .read(cx)
                                 .view_list()
@@ -958,7 +976,7 @@ impl BrowseUi {
                                 .map(|(i, element_type)| match element_type {
                                     ElementType::File(file) => self.render_file_item(i, file, cx),
                                     ElementType::Section(date) => div()
-                                        .h(px(36.))
+                                        .h(SECTION_HEIGHT)
                                         .px_2()
                                         .flex()
                                         .items_center()

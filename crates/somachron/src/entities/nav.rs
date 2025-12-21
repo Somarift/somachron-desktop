@@ -47,6 +47,16 @@ impl NavState {
         self.ty = ViewType::Media;
         self
     }
+
+    pub fn for_browse(mut self) -> Self {
+        self.ty = ViewType::Browse;
+        self
+    }
+
+    pub fn for_gallery(mut self) -> Self {
+        self.ty = ViewType::Gallery;
+        self
+    }
 }
 
 pub type Navigation = Entity<NavStack>;
@@ -158,7 +168,8 @@ impl NavStack {
         // i know it's size will be 1 but who knows !
         // remove all views where folder_id matched
         for state in entries.into_iter() {
-            let _ = self.views.remove(&state);
+            let view = self.views.remove(&state);
+            drop(view);
         }
         self.stack = stack;
 

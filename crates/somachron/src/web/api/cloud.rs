@@ -26,6 +26,13 @@ pub async fn list_files(
     super::get(format!("/media/ls/{folder_id}"), token, Some(space_id)).await
 }
 
+pub async fn list_gallery_files(
+    token: &str,
+    space_id: &Uuid,
+) -> Result<Vec<FileMetaReponse>, AppError> {
+    super::get(format!("/media/lg"), token, Some(space_id)).await
+}
+
 pub async fn get_folder(
     token: &str,
     space_id: &Uuid,

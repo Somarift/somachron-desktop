@@ -9,6 +9,7 @@ pub enum MediaType {
 
 pub mod res {
     use chrono::{DateTime, Utc};
+    use gpui::SharedString;
     use serde::Deserialize;
     use uuid::Uuid;
 
@@ -27,11 +28,11 @@ pub mod res {
         pub id: Uuid,
         pub updated_at: DateTime<Utc>,
 
-        pub file_name: String,
+        pub file_name: SharedString,
         pub media_type: super::MediaType,
-        pub user: Option<String>,
+        // pub user: Option<String>,
         pub width: i32,
-        pub height: i32,
+        // pub height: i32,
     }
 
     #[derive(Debug, Deserialize, Clone)]
