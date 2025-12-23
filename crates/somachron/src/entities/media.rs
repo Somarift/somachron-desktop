@@ -25,7 +25,7 @@ impl EventEmitter<FetchMedia> for MediaState {}
 pub enum PreviewAssetType {
     Loading,
     Preview(PathBuf),
-    VideoUrl(String),
+    VideoUrl(url::Url),
 }
 
 #[derive(Debug, Clone)]
@@ -164,6 +164,11 @@ impl MediaState {
 
         self.visible_grid = Vec::new();
         let mut sections = Vec::new();
+        for element in self.view_list.iter().take(1) {
+            if let ElementType::Section(date) = element {
+                sections.push((date.clone(), px(0.)));
+            }
+        }
 
         let mut start = 0;
         let mut used_height = SECTION_HEIGHT + MEDIA_GAP;

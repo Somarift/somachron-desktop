@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
+use futures::StreamExt;
 use gpui::{prelude::FluentBuilder, *};
+use gpui_component::collapsible::Collapsible;
+use gpui_component::tooltip::Tooltip;
 use gpui_component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable, StyledExt, ThemeMode, TitleBar,
     WindowExt,
@@ -13,33 +16,42 @@ use gpui_component::{
 };
 use uuid::Uuid;
 
+use crate::entities::upload::UploadJobStatus;
 use crate::{
-    auth::{AuthEvent, AuthState},
+    auth::{AuthEvent, AuthState, InnerAuth},
     entities::{
         UserData,
         nav::{NavEvent, NavState, Navigation},
+        upload::{UploadJob, UploadManager, UploadUrlState},
     },
     rt,
     theme::*,
     ui::{
-        _components::{app_icon, create_space_dialog, select_space_dialog},
+        _components::{app_icon, create_space_dialog, loading_icon, select_space_dialog},
         home::browse::BrowseUi,
     },
     util::MapAsync,
-    web::api,
+    web::api::{self, models::cloud::res::InitiateUploadResponse},
 };
 
-actions!([EmptyAction]);
+actions!(header, [EmptyAction, ClearJobs]);
+
+pub struct JobViewCollapsible {
+    opened: Vec<bool>,
+}
 
 pub struct HeaderUi {
     auth: AuthState,
     user_data: Entity<UserData>,
     nav: Navigation,
+    upload_manager: Entity<UploadManager>,
 
     logged_in: bool,
     loading_spaces: bool,
     loading_user: bool,
     creating_space: bool,
+    upload_running: bool,
+    job_view_collapsible: Entity<JobViewCollapsible>,
 
     _subscriptions: Vec<Subscription>,
 }
@@ -48,10 +60,30 @@ impl HeaderUi {
     pub fn new(
         auth: AuthState,
         user_data: Entity<UserData>,
+        upload_manager: Entity<UploadManager>,
         nav: Navigation,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let job_view_collapsible = cx.new(|_cx| JobViewCollapsible { opened: Vec::new() });
+
+        let upload_sub = cx.subscribe_in(&upload_manager, window, |this, _, _ev, window, cx| {
+            let opened = this
+                .upload_manager
+                .read(cx)
+                .jobs()
+                .iter()
+                .map(|_| false)
+                .collect::<Vec<_>>();
+
+            this.job_view_collapsible.update(cx, |jb, cx| {
+                jb.opened = opened;
+                cx.notify();
+            });
+
+            this.process_upload(window, cx);
+        });
+
         let auth_sub = cx.subscribe_in(&auth, window, |this, _, event, window, cx| {
             match event {
                 crate::auth::AuthEvent::Session(session_state) => match session_state {
@@ -90,22 +122,26 @@ impl HeaderUi {
             auth,
             user_data,
             nav,
+            upload_manager,
             logged_in: false,
             loading_spaces: false,
             loading_user: false,
             creating_space: false,
-            _subscriptions: vec![auth_sub, nav_sub],
+            upload_running: false,
+            job_view_collapsible,
+            _subscriptions: vec![auth_sub, nav_sub, upload_sub],
         }
     }
 
     pub fn view(
         auth: AuthState,
         user_data: Entity<UserData>,
+        upload_manager: Entity<UploadManager>,
         nav: Navigation,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| Self::new(auth, user_data, nav, window, cx))
+        cx.new(|cx| Self::new(auth, user_data, upload_manager, nav, window, cx))
     }
 
     fn change_mode(&mut self, _: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -195,6 +231,7 @@ impl HeaderUi {
                                         this.auth.clone(),
                                         this.user_data.clone(),
                                         this.nav.clone(),
+                                        this.upload_manager.clone(),
                                         NavState::new(user_space.space.id, user_space.folder),
                                         window,
                                         cx,
@@ -245,6 +282,220 @@ impl HeaderUi {
             });
         })
         .detach();
+    }
+
+    fn process_upload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.upload_running {
+            return;
+        }
+
+        self.upload_running = true;
+        cx.notify();
+
+        tracing::info!(msg = "starting upload loop");
+
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                let jobs_result = this.read_with(cx, |this, cx| {
+                    this.upload_manager.read(cx).next(cx).cloned()
+                });
+
+                let Ok(inner) = this.read_with(cx, |this, cx| this.auth.read(cx).inner()) else {
+                    break;
+                };
+
+                match jobs_result {
+                    Ok(jobs) => match jobs {
+                        Some(job) => {
+                            let _ = this.update_in(cx, |_this, window, cx| {
+                                window.push_notification(Notification::info("Upload started"), cx);
+                                job.clone().update(cx, |job, cx| {
+                                    job.status = UploadJobStatus::InProgress;
+                                    cx.notify();
+                                });
+                            });
+
+                            Self::initialize_uploads(inner.clone(), job.clone(), cx).await;
+
+                            Self::upload_files(inner, job.clone(), cx).await;
+
+                            let _ = this.update(cx, |this, cx| {
+                                let space_id = job.read(cx).space_id.clone();
+                                let folder_id = job.read(cx).folder.id.clone();
+
+                                this.nav.update(cx, |_nav, cx| {
+                                    cx.emit(NavEvent::RefreshView(NavState::new(
+                                        space_id.clone(),
+                                        folder_id,
+                                    )));
+                                });
+
+                                job.clone().update(cx, |job, cx| {
+                                    if job
+                                        .uploads
+                                        .iter()
+                                        .all(|u| matches!(u.url_state, UploadUrlState::Done))
+                                    {
+                                        job.status = UploadJobStatus::Done;
+                                    }
+                                    cx.notify();
+                                });
+                            });
+                        }
+                        None => break,
+                    },
+                    Err(err) => {
+                        let _ = this.update_in(cx, |_this, window, cx| {
+                            window.push_notification(
+                                Notification::error(format!("{err}"))
+                                    .title("Failed to handle upload jobs"),
+                                cx,
+                            );
+                        });
+
+                        break;
+                    }
+                };
+            }
+
+            tracing::info!(msg = "No jobs.. loop complete");
+            let _ = this.update(cx, |this, cx| {
+                this.upload_running = false;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    async fn initialize_uploads(
+        inner: Arc<InnerAuth>,
+        job: Entity<UploadJob>,
+        cx: &mut AsyncWindowContext,
+    ) {
+        let tasks = job
+            .read_with(cx, |this, cx| {
+                let job = job.clone();
+                let folder_id = this.folder.id;
+                let space_id = this.space_id;
+
+                this.uploads
+                    .iter()
+                    .enumerate()
+                    .map(|(i, state)| {
+                        let inner = inner.clone();
+                        let job = job.clone();
+
+                        let file_name = state
+                            .path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|s| s.to_owned())
+                            .unwrap_or_default();
+
+                        let task = rt::spawn(cx, async move {
+                            inner
+                                .get_token()
+                                .await
+                                .map_async(async move |token| {
+                                    api::cloud::init_file_upload(
+                                        &token, &space_id, &folder_id, &file_name,
+                                    )
+                                    .await
+                                })
+                                .await
+                        });
+
+                        cx.spawn(async move |cx| {
+                            let result = task.await.flatten();
+                            let _ = job.update(cx, |job, cx| {
+                                job.uploads.get_mut(i).map(|u| match result {
+                                    Ok(data) => u.url_state = UploadUrlState::Uploading(data),
+                                    Err(err) => u.url_state = UploadUrlState::Error(err),
+                                });
+                                cx.notify();
+                            });
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        cx.spawn(async move |_cx| {
+            let _ = futures::stream::iter(tasks)
+                .buffer_unordered(8)
+                .collect::<Vec<_>>()
+                .await;
+        })
+        .await;
+    }
+
+    async fn upload_files(
+        inner: Arc<InnerAuth>,
+        job: Entity<UploadJob>,
+        cx: &mut AsyncWindowContext,
+    ) {
+        let tasks = job
+            .update(cx, |this, cx| {
+                let folder_id = this.folder.id;
+                let space_id = this.space_id;
+
+                this.uploads
+                    .iter_mut()
+                    .enumerate()
+                    .filter_map(|(i, state)| {
+                        let job = job.clone();
+                        let inner = inner.clone();
+                        let path = state.path.clone();
+
+                        if let UploadUrlState::Uploading(data) = &state.url_state {
+                            let InitiateUploadResponse { url, file_name } = data.clone();
+
+                            let task = rt::spawn(cx, async move {
+                                api::upload(url.as_str(), path)
+                                    .await
+                                    .map_async(async move |data| {
+                                        inner.get_token().await.map(|token| (token, data.0, data.1))
+                                    })
+                                    .await
+                                    .map_async(async move |(token, file_size, updated_millis)| {
+                                        api::cloud::complete_file_upload(
+                                            &token,
+                                            &space_id,
+                                            &folder_id,
+                                            file_name.as_str(),
+                                            file_size,
+                                            updated_millis,
+                                        )
+                                        .await
+                                    })
+                                    .await
+                            });
+
+                            Some(cx.spawn(async move |_this, cx| {
+                                let result = task.await.flatten();
+                                let _ = job.update(cx, |job, cx| {
+                                    job.uploads.get_mut(i).map(|u| match result {
+                                        Ok(_) => u.url_state = UploadUrlState::Done,
+                                        Err(err) => u.url_state = UploadUrlState::Error(err),
+                                    });
+                                    cx.notify();
+                                });
+                            }))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        cx.spawn(async move |_cx| {
+            let _ = futures::stream::iter(tasks)
+                .buffer_unordered(8)
+                .collect::<Vec<_>>()
+                .await;
+        })
+        .await;
     }
 }
 
@@ -324,10 +575,17 @@ impl Render for HeaderUi {
             })
             .child(
                 div()
+                    .on_action(cx.listener(|this, _: &ClearJobs, _window, cx| {
+                        this.upload_manager.update(cx, |um, cx| {
+                            um.trim_completed(cx);
+                            cx.notify();
+                        });
+                    }))
                     .pr(px(5.0))
                     .flex()
                     .gap_1()
                     .items_center()
+                    .child(self.render_upload_popup(cx))
                     .when(self.logged_in, |this| {
                         this.child(self.render_user_popup(cx))
                     })
@@ -504,6 +762,7 @@ impl HeaderUi {
                                                         this.auth.clone(),
                                                         this.user_data.clone(),
                                                         this.nav.clone(),
+                                                        this.upload_manager.clone(),
                                                         state,
                                                         window,
                                                         cx,
@@ -527,6 +786,7 @@ impl HeaderUi {
                         .small()
                         .disabled(self.loading_spaces)
                         .on_click(cx.listener(move |_this, _ev, window, cx| {
+                            cx.stop_propagation();
                             let us = us.clone();
 
                             window.open_sheet(cx, move |sheet, _window, _cx| {
@@ -545,6 +805,171 @@ impl HeaderUi {
                         })),
                 )
             })
+    }
+
+    fn render_upload_popup(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let entity = cx.weak_entity();
+
+        Button::new("upld")
+            .icon(Icon::empty().path("icons/upload.svg"))
+            .small()
+            .outline()
+            .mr_1()
+            .on_click(|_ev, _window, cx| {
+                cx.stop_propagation();
+            })
+            .dropdown_menu(move |menu, _window, cx| {
+                let entity = entity.clone();
+
+                let (jobs, collapsible) = entity
+                    .read_with(cx, |this, cx| {
+                        (
+                            this.upload_manager.read(cx).jobs().clone(),
+                            this.job_view_collapsible.clone(),
+                        )
+                    })
+                    .unwrap();
+
+                let mut menu = menu.max_w(px(512.));
+                if jobs.is_empty() {
+                    return menu.menu("No upload jobs", Box::new(EmptyAction));
+                }
+
+                for (i, job) in jobs.into_iter().enumerate() {
+                    let collapsible = collapsible.clone();
+                    menu = menu
+                        .menu_element(Box::new(EmptyAction), move |_window, cx| {
+                            let cl = collapsible.clone();
+
+                            Collapsible::new()
+                                .min_w_112()
+                                .gap_2()
+                                .open(
+                                    collapsible
+                                        .read(cx)
+                                        .opened
+                                        .get(i)
+                                        .cloned()
+                                        .unwrap_or_default(),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .gap_2()
+                                        .child(format!(
+                                            "{}: {}",
+                                            match job.read(cx).status {
+                                                UploadJobStatus::Queued => "Queued",
+                                                UploadJobStatus::InProgress => "Uploading",
+                                                UploadJobStatus::Done => "Completed",
+                                            },
+                                            job.read(cx).folder.path.clone()
+                                        ))
+                                        .child(
+                                            Button::new(SharedString::new(format!("btn-cl-{i}")))
+                                                .icon(IconName::ChevronsUpDown)
+                                                .small()
+                                                .outline()
+                                                .on_click(move |_ev, _window, cx| {
+                                                    cx.stop_propagation();
+
+                                                    cl.update(cx, |cl, cx| {
+                                                        cl.opened.get_mut(i).map(|o| *o = !*o);
+                                                        cx.notify();
+                                                    });
+                                                }),
+                                        ),
+                                )
+                                .content(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .max_h_112()
+                                        .min_w_112()
+                                        .gap_2()
+                                        .child(Self::render_job_menu_view(i, job.clone(), cx))
+                                        .child(div().child(format!(
+                                            "Total items: {}",
+                                            job.read(cx).uploads.len()
+                                        ))),
+                                )
+                        })
+                        .separator();
+                }
+                menu.separator()
+                    .menu_element(Box::new(ClearJobs), move |_window, _cx| {
+                        div()
+                            .flex()
+                            .gap_2()
+                            .items_center()
+                            .child(Icon::new(IconName::Close))
+                            .child("Clear all")
+                    })
+            })
+    }
+
+    fn render_job_menu_view(i: usize, job: Entity<UploadJob>, cx: &App) -> impl IntoElement {
+        div()
+            .id(SharedString::new(i.to_string()))
+            .h_full()
+            .overflow_y_scroll()
+            .w_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_1()
+            .justify_start()
+            .children(job.read(cx).uploads.iter().map(|state| {
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .w_full()
+                    .px_2()
+                    .py_0p5()
+                    .rounded_l_lg()
+                    .bg(cx.theme().sidebar)
+                    .child(
+                        div()
+                            .text_sm()
+                            .max_w_64()
+                            .truncate()
+                            .text_ellipsis()
+                            .whitespace_normal()
+                            .child(
+                                state
+                                    .path
+                                    .file_name()
+                                    .and_then(|f| f.to_str())
+                                    .map(|s| s.to_owned())
+                                    .unwrap_or_default(),
+                            ),
+                    )
+                    .map(|this| match &state.url_state {
+                        UploadUrlState::Queued => this.child(loading_icon(|icon| icon.size_4())),
+                        UploadUrlState::Uploading(_) => {
+                            this.child(Icon::empty().path("icons/upload.svg"))
+                        }
+                        UploadUrlState::Done => {
+                            this.child(Icon::empty().path("icons/check.svg").text_color(green()))
+                        }
+                        UploadUrlState::Error(err) => {
+                            let message = err.message.clone();
+                            this.child(
+                                div()
+                                    .id(SharedString::from(format!("err-{i}")))
+                                    .child(
+                                        Icon::new(IconName::CircleX).text_color(cx.theme().danger),
+                                    )
+                                    .tooltip(move |window, cx| {
+                                        Tooltip::new(message.clone()).build(window, cx)
+                                    }),
+                            )
+                        }
+                    })
+            }))
     }
 
     fn render_nav_buttons(&mut self, cx: &mut Context<Self>) -> impl IntoElement {

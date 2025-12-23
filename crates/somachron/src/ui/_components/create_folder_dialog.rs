@@ -11,7 +11,7 @@ use gpui_component::{
 pub trait CreateFolderDialog: Sized {
     fn create_folder(&mut self, name: SharedString, window: &mut Window, cx: &mut Context<Self>);
 
-    fn current_path(&self) -> String;
+    fn current_path(&self) -> SharedString;
 
     fn is_loading(&self) -> bool;
 }

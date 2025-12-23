@@ -49,6 +49,14 @@ pub(super) fn make_http_client() -> reqwest::Client {
         .default_headers({
             let mut map = reqwest::header::HeaderMap::new();
             map.insert(http::header::USER_AGENT, user_agent.clone());
+            map.insert(
+                http::header::ORIGIN,
+                reqwest::header::HeaderValue::from_static("https://somachron.shank03.com"),
+            );
+            map.insert(
+                http::header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                reqwest::header::HeaderValue::from_static("https://somachron.shank03.com"),
+            );
             map
         })
         // .use_rustls_tls()

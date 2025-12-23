@@ -2,7 +2,10 @@ use uuid::Uuid;
 
 use crate::web::api::{
     EmptyResponse,
-    models::cloud::{req::CreateFolderRequest, res::StreamedUrlResponse},
+    models::cloud::{
+        req::{CreateFolderRequest, InitiateUploadRequest, UploadCompleteRequest},
+        res::{InitiateUploadResponse, StreamedUrlResponse},
+    },
 };
 
 use super::{
@@ -89,4 +92,44 @@ pub async fn delete_file(
     file_id: &Uuid,
 ) -> Result<EmptyResponse, AppError> {
     super::delete(format!("/media/rmf/{file_id}"), &token, Some(space_id)).await
+}
+
+pub async fn init_file_upload(
+    token: &str,
+    space_id: &Uuid,
+    folder_id: &Uuid,
+    name: &str,
+) -> Result<InitiateUploadResponse, AppError> {
+    super::post(
+        "/media/upload",
+        &token,
+        Some(space_id),
+        InitiateUploadRequest {
+            folder_id: *folder_id,
+            file_name: name.to_owned(),
+        },
+    )
+    .await
+}
+
+pub async fn complete_file_upload(
+    token: &str,
+    space_id: &Uuid,
+    folder_id: &Uuid,
+    name: &str,
+    size: u64,
+    millis: u64,
+) -> Result<EmptyResponse, AppError> {
+    super::post(
+        "/media/upload/complete",
+        token,
+        Some(space_id),
+        UploadCompleteRequest {
+            folder_id: *folder_id,
+            file_name: name.to_owned(),
+            file_size: size,
+            updated_millis: millis,
+        },
+    )
+    .await
 }

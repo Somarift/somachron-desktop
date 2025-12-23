@@ -163,7 +163,8 @@ impl Render for MediaUi {
                                             }),
                                         )
                                     }
-                                    PreviewAssetType::VideoUrl(_) => {
+                                    PreviewAssetType::VideoUrl(url) => {
+                                        dbg!(&url.to_string());
                                         this.child(div().child("Video")).size_full()
                                     }
                                 }

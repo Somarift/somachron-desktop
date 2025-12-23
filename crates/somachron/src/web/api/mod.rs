@@ -20,7 +20,7 @@ const SPACE_ID_HEADER: &str = "X-Space-ID";
 
 static API_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| super::make_http_client());
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct EmptyResponse {
     pub status: u16,
     pub message: String,
@@ -44,7 +44,55 @@ pub async fn download(url: String, dst: PathBuf) -> Result<PathBuf, AppError> {
             .await
             .map_err(|err| AppError::err(err))?;
 
+        tracing::info!(
+            msg = "Downloaded file",
+            path = format!("{}", dst.to_string_lossy())
+        );
+
         return Ok(dst);
+    }
+
+    let text = res.text().await.map_err(|err| AppError::err(err))?;
+    Err(AppError {
+        status: status.as_u16(),
+        message: text,
+        req_id: "".into(),
+    })
+}
+
+pub async fn upload(url: &str, from: PathBuf) -> Result<(u64, u64), AppError> {
+    let file = tokio::fs::File::open(&from)
+        .await
+        .map_err(|err| AppError::err(err))?;
+    let metadata = file.metadata().await.map_err(|err| AppError::err(err))?;
+
+    let file_size = metadata.len();
+    let system_time = metadata.modified().map_err(|err| AppError::err(err))?;
+    let updated_millis = system_time
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .map_err(|err| AppError::err(err))?;
+
+    let stream = tokio_util::io::ReaderStream::with_capacity(file, 4096);
+    let res = API_CLIENT
+        .put(url)
+        .header(
+            reqwest::header::CONTENT_LENGTH,
+            reqwest::header::HeaderValue::from_str(file_size.to_string().as_str()).unwrap(),
+        )
+        .body(reqwest::Body::wrap_stream(stream))
+        .send()
+        .await
+        .map_err(|err| AppError::err(err))?;
+
+    let status = res.status();
+
+    if status.is_success() {
+        tracing::info!(
+            msg = "Uploaded file",
+            path = format!("{}", from.to_string_lossy())
+        );
+        return Ok((file_size, updated_millis));
     }
 
     let text = res.text().await.map_err(|err| AppError::err(err))?;

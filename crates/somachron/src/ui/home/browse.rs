@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, ops::Range, path::PathBuf, str::FromStr, sync::Arc};
 
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
@@ -6,11 +6,13 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     h_flex,
+    label::Label,
     menu::DropdownMenu,
     notification::Notification,
     scroll::ScrollableElement,
     sidebar::{Sidebar, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
 };
+use url::Url;
 use uuid::Uuid;
 
 use crate::{
@@ -23,6 +25,7 @@ use crate::{
             PreviewAssetType, SECTION_HEIGHT,
         },
         nav::{NavEvent, NavId, NavState, Navigation},
+        upload::{UploadJob, UploadManager},
     },
     err::AppError,
     rt,
@@ -46,6 +49,7 @@ pub struct BrowseUi {
     auth: AuthState,
     user_data: Entity<UserData>,
     nav: Navigation,
+    upload_manager: Entity<UploadManager>,
     render_bounds: Entity<RenderBounds>,
 
     current_nav: NavState,
@@ -70,6 +74,7 @@ impl BrowseUi {
         auth: AuthState,
         user_data: Entity<UserData>,
         nav: Navigation,
+        upload_manager: Entity<UploadManager>,
         current_nav: NavState,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -87,9 +92,18 @@ impl BrowseUi {
         );
 
         let nav_sub = cx.subscribe_in(&nav, window, |this, _entity, event, window, cx| {
-            if let NavEvent::Refresh = event {
-                this.reset_state(cx);
-                this.fetch_files(window, cx);
+            let (refresh, fetch_files) = match event {
+                NavEvent::Refresh => (true, true),
+                NavEvent::RefreshView(nav_state) => (true, &this.current_nav == nav_state),
+                _ => (false, false),
+            };
+
+            if refresh {
+                if fetch_files {
+                    this.reset_state(cx);
+                    this.fetch_files(window, cx);
+                }
+
                 this.fetch_folders(window, cx);
             }
         });
@@ -106,6 +120,7 @@ impl BrowseUi {
             nav,
             render_bounds,
             current_nav,
+            upload_manager,
             folder: None,
             folders: Vec::new(),
             media_state,
@@ -125,12 +140,21 @@ impl BrowseUi {
         auth: AuthState,
         user_data: Entity<UserData>,
         nav: Navigation,
+        upload_manager: Entity<UploadManager>,
         current_nav: NavState,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
         cx.new(|cx| {
-            let mut entity = Self::new(auth, user_data, nav, current_nav.for_browse(), window, cx);
+            let mut entity = Self::new(
+                auth,
+                user_data,
+                nav,
+                upload_manager,
+                current_nav.for_browse(),
+                window,
+                cx,
+            );
             entity.fetch_folders(window, cx);
             entity.fetch_files(window, cx);
             entity
@@ -423,7 +447,10 @@ impl BrowseUi {
                     MediaType::Image => api::download(urls.url, pr_path)
                         .await
                         .map(PreviewAssetType::Preview),
-                    MediaType::Video => Ok(PreviewAssetType::VideoUrl(urls.url)),
+                    MediaType::Video => {
+                        let url = Url::from_str(&urls.url).map_err(|err| AppError::err(err))?;
+                        Ok(PreviewAssetType::VideoUrl(url))
+                    }
                 })
                 .await;
 
@@ -473,6 +500,154 @@ impl BrowseUi {
             );
             cx.notify();
         });
+    }
+
+    fn open_upload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(SharedString::new_static("Select files to upload")),
+        });
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = paths.await;
+
+            let result = match result {
+                Ok(r) => r,
+                Err(err) => {
+                    let _ = this.update_in(cx, |_this, window, cx| {
+                        window.push_notification(
+                            Notification::warning(format!("{err}")).title("No file selected"),
+                            cx,
+                        );
+                    });
+                    return;
+                }
+            };
+
+            match result {
+                Ok(Some(paths)) => {
+                    let paths = paths
+                        .into_iter()
+                        .filter(|p| {
+                            p.extension()
+                                .and_then(|e| e.to_str())
+                                .map(|e| {
+                                    [
+                                        "jpg", "JPG", "jpeg", "JPEG", "HEIC", "heic", "MOV", "mov",
+                                        "mp4", "MP4", "mpeg", "MPEG", "png", "PNG",
+                                    ]
+                                    .contains(&e)
+                                })
+                                .unwrap_or_default()
+                        })
+                        .collect::<Vec<_>>();
+
+                    let _ = this.update_in(cx, move |_this, window, cx| {
+                        let paths = Arc::new(paths);
+
+                        if paths.is_empty() {
+                            window.push_notification(
+                                Notification::info("No media files selected"),
+                                cx,
+                            );
+                        } else {
+                            let entity = cx.weak_entity();
+
+                            window.open_dialog(cx, move |dialog, _window, cx| {
+                                let entity = entity.clone();
+                                let paths = paths.clone();
+
+                                dialog
+                                    .alert()
+                                    .keyboard(false)
+                                    .overlay_closable(false)
+                                    .rounded_lg()
+                                    .title("Upload")
+                                    .v_flex()
+                                    .max_h_128()
+                                    .child(
+                                        div()
+                                            .id("upload-d")
+                                            .overflow_y_scroll()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_2()
+                                            .children(paths.iter().cloned().map(|p| {
+                                                div()
+                                                    .px_2()
+                                                    .py_1()
+                                                    .rounded_md()
+                                                    .bg(cx.theme().sidebar)
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .child(Icon::new(IconName::File).small())
+                                                    .text_sm()
+                                                    .child(Label::new(
+                                                        p.file_name()
+                                                            .and_then(|s| s.to_str())
+                                                            .map(|s| s.to_owned())
+                                                            .unwrap_or_default(),
+                                                    ))
+                                            })),
+                                    )
+                                    .footer(move |_, _, _, _| {
+                                        let entity = entity.clone();
+                                        let paths = paths.clone();
+
+                                        let cancel = Button::new("upld-cancel")
+                                            .label("Cancel")
+                                            .on_click(|_, window, cx| {
+                                                window.close_dialog(cx);
+                                            });
+
+                                        let submit = Button::new("upld-sbt")
+                                            .primary()
+                                            .label("Upload")
+                                            .on_click(move |_ev, window, cx| {
+                                                window.close_dialog(cx);
+
+                                                let entity = entity.clone();
+                                                let paths = paths.clone();
+                                                let _ = entity.update(cx, |this, cx| {
+                                                    if let Some(folder) = this.folder.as_ref() {
+                                                        this.upload_manager.update(cx, |um, cx| {
+                                                            um.push(
+                                                                UploadJob::new(
+                                                                    paths,
+                                                                    this.current_nav
+                                                                        .space_id()
+                                                                        .clone(),
+                                                                    folder.clone(),
+                                                                    cx,
+                                                                ),
+                                                                cx,
+                                                            );
+                                                        });
+                                                    }
+                                                });
+                                            });
+
+                                        vec![cancel, submit]
+                                    })
+                            });
+                        }
+                    });
+                }
+                Err(err) => {
+                    let _ = this.update_in(cx, |_this, window, cx| {
+                        window.push_notification(
+                            Notification::error(format!("{err}")).title("Upload cancelled"),
+                            cx,
+                        );
+                    });
+                }
+                _ => {}
+            };
+        })
+        .detach();
     }
 }
 
@@ -525,7 +700,7 @@ impl create_folder_dialog::CreateFolderDialog for BrowseUi {
         .detach();
     }
 
-    fn current_path(&self) -> String {
+    fn current_path(&self) -> SharedString {
         self.folder
             .as_ref()
             .map(|f| f.path.clone())
@@ -600,9 +775,9 @@ impl delete_dialog::DeleteDialog for BrowseUi {
 
                         match fs_id {
                             delete_dialog::DeleteType::File(_) => {
-                                this.reset_state(cx);
-                                this.fetch_files(window, cx);
-                                this.fetch_folders(window, cx);
+                                this.nav.update(cx, |_nav, cx| {
+                                    cx.emit(NavEvent::RefreshView(this.current_nav.clone()));
+                                });
                             }
                             delete_dialog::DeleteType::Folder((folder_id, _)) => {
                                 this.fetch_folders(window, cx);
@@ -873,6 +1048,7 @@ impl BrowseUi {
                             this.auth.clone(),
                             this.user_data.clone(),
                             this.nav.clone(),
+                            this.upload_manager.clone(),
                             this.current_nav.clone().with_folder(folder_id),
                             window,
                             cx,
@@ -920,7 +1096,12 @@ impl BrowseUi {
                     .icon(Icon::empty().path("icons/upload.svg"))
                     .label("Upload")
                     .small()
-                    .disabled(self.loading_folders),
+                    .disabled(self.loading_folders)
+                    .on_click(cx.listener(|this, _ev, window, cx| {
+                        // window.prompt(level, message, detail, answers, cx)
+
+                        this.open_upload(window, cx);
+                    })),
             )
             .horizontal_scrollbar(&self.header_scroll_handle)
     }

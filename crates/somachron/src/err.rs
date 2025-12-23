@@ -1,7 +1,7 @@
 use tokio::task::JoinError;
 
 #[allow(warnings)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AppError {
     pub status: u16,
     pub message: String,

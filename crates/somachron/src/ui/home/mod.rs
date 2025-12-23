@@ -9,6 +9,7 @@ use crate::{
     entities::{
         UserData,
         nav::{NavEvent, NavState, Navigation},
+        upload::UploadManager,
     },
     rt,
     ui::{
@@ -27,6 +28,7 @@ actions!(user, [MyAction, SignOut]);
 pub struct HomeUi {
     auth: AuthState,
     user_data: Entity<UserData>,
+    upload_manager: Entity<UploadManager>,
     nav: Navigation,
 
     loading_sidebar: bool,
@@ -38,6 +40,7 @@ impl HomeUi {
     fn new(
         auth: AuthState,
         user_data: Entity<UserData>,
+        upload_manager: Entity<UploadManager>,
         nav: Navigation,
         _window: &mut Window,
         _cx: &mut Context<Self>,
@@ -45,6 +48,7 @@ impl HomeUi {
         Self {
             auth,
             user_data,
+            upload_manager,
             nav,
             loading_sidebar: false,
             creating_space: false,
@@ -55,11 +59,12 @@ impl HomeUi {
     pub fn view(
         auth: AuthState,
         user_data: Entity<UserData>,
+        upload_manager: Entity<UploadManager>,
         nav: Navigation,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| Self::new(auth, user_data, nav, window, cx))
+        cx.new(|cx| Self::new(auth, user_data, upload_manager, nav, window, cx))
     }
 }
 
@@ -282,6 +287,7 @@ impl HomeUi {
                                             this.auth.clone(),
                                             this.user_data.clone(),
                                             this.nav.clone(),
+                                            this.upload_manager.clone(),
                                             NavState::new(space_id.clone(), folder_id.clone()),
                                             window,
                                             cx,

@@ -4,7 +4,7 @@ use header::HeaderUi;
 
 use crate::{
     auth::{Auth, AuthClientEvent, AuthEvent, AuthState, SessionState},
-    entities::{UserData, nav::NavStack},
+    entities::{UserData, nav::NavStack, upload::UploadManager},
     rt,
     ui::{home::HomeUi, login::LoginUi},
 };
@@ -49,10 +49,25 @@ impl Rooter {
         let auth = cx.new(|cx| Auth::init(cx));
         let user_state = cx.new(|_| UserData::new());
         let nav = cx.new(|_| NavStack::new());
+        let upload_manager = cx.new(|_cx| UploadManager::new());
 
-        let header_ui = HeaderUi::view(auth.clone(), user_state.clone(), nav.clone(), window, cx);
+        let header_ui = HeaderUi::view(
+            auth.clone(),
+            user_state.clone(),
+            upload_manager.clone(),
+            nav.clone(),
+            window,
+            cx,
+        );
         let login_ui = LoginUi::view(auth.clone(), window, cx);
-        let home_ui = HomeUi::view(auth.clone(), user_state.clone(), nav.clone(), window, cx);
+        let home_ui = HomeUi::view(
+            auth.clone(),
+            user_state.clone(),
+            upload_manager.clone(),
+            nav.clone(),
+            window,
+            cx,
+        );
 
         let _auth = auth.clone();
         cx.on_window_closed(move |cx| {

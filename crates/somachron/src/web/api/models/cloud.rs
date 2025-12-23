@@ -20,7 +20,7 @@ pub mod res {
         pub updated_at: DateTime<Utc>,
 
         pub name: SharedString,
-        pub path: String,
+        pub path: SharedString,
     }
 
     #[derive(Debug, Deserialize, Clone)]
@@ -39,6 +39,12 @@ pub mod res {
     pub struct StreamedUrlResponse {
         pub url: String,
     }
+
+    #[derive(Debug, Deserialize, Clone)]
+    pub struct InitiateUploadResponse {
+        pub url: SharedString,
+        pub file_name: SharedString,
+    }
 }
 
 pub mod req {
@@ -49,5 +55,19 @@ pub mod req {
     pub struct CreateFolderRequest {
         pub parent_folder_id: Uuid,
         pub folder_name: String,
+    }
+
+    #[derive(Debug, Serialize)]
+    pub struct InitiateUploadRequest {
+        pub folder_id: Uuid,
+        pub file_name: String,
+    }
+
+    #[derive(Debug, Serialize)]
+    pub struct UploadCompleteRequest {
+        pub folder_id: Uuid,
+        pub file_name: String,
+        pub file_size: u64,
+        pub updated_millis: u64,
     }
 }
