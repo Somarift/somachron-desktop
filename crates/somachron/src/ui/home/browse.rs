@@ -1,5 +1,6 @@
 use std::{collections::HashMap, ops::Range, path::PathBuf, str::FromStr, sync::Arc};
 
+use futures::StreamExt;
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
     ActiveTheme, Disableable, Icon, IconName, Side, Sizable, StyledExt, WindowExt,
@@ -731,11 +732,27 @@ impl delete_dialog::DeleteDialog for BrowseUi {
                     delete_dialog::DeleteType::File(uuids) => {
                         let mut err_message = String::from("");
 
-                        for (file_id, name) in uuids.into_iter() {
-                            let result =
-                                api::cloud::delete_file(&token, nav_state.space_id(), &file_id)
-                                    .await;
-                            if let Err(err) = result {
+                        let tasks = uuids.into_iter().map(|(file_id, name)| {
+                            let token = token.clone();
+                            let nav_state = nav_state.clone();
+                            async move {
+                                api::cloud::delete_file(
+                                    token.as_str(),
+                                    nav_state.space_id(),
+                                    &file_id,
+                                )
+                                .await
+                                .map_err(|err| (err, name))
+                            }
+                        });
+
+                        let results = futures::stream::iter(tasks)
+                            .buffer_unordered(8)
+                            .collect::<Vec<_>>()
+                            .await;
+
+                        for result in results.into_iter() {
+                            if let Err((err, name)) = result {
                                 err_message.push_str(name.as_str());
                                 err_message.push_str(": ");
                                 err_message.push_str(&err.message);
