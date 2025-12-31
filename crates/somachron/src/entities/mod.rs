@@ -5,7 +5,7 @@ use crate::web::api::models::{space::res::UserSpaceResponse, user::res::UserResp
 pub mod bounds;
 pub mod media;
 pub mod nav;
-pub mod upload;
+pub mod transfer;
 
 pub struct UserData {
     pub user_spaces: Vec<Arc<UserSpaceResponse>>,

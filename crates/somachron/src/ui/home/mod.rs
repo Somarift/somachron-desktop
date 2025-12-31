@@ -9,7 +9,7 @@ use crate::{
     entities::{
         UserData,
         nav::{NavEvent, NavState, Navigation},
-        upload::UploadManager,
+        transfer::TransferManager,
     },
     rt,
     ui::{
@@ -28,7 +28,7 @@ actions!(user, [MyAction, SignOut]);
 pub struct HomeUi {
     auth: AuthState,
     user_data: Entity<UserData>,
-    upload_manager: Entity<UploadManager>,
+    transfer_manager: Entity<TransferManager>,
     nav: Navigation,
 
     loading_sidebar: bool,
@@ -40,7 +40,7 @@ impl HomeUi {
     fn new(
         auth: AuthState,
         user_data: Entity<UserData>,
-        upload_manager: Entity<UploadManager>,
+        transfer_manager: Entity<TransferManager>,
         nav: Navigation,
         _window: &mut Window,
         _cx: &mut Context<Self>,
@@ -48,7 +48,7 @@ impl HomeUi {
         Self {
             auth,
             user_data,
-            upload_manager,
+            transfer_manager,
             nav,
             loading_sidebar: false,
             creating_space: false,
@@ -59,12 +59,12 @@ impl HomeUi {
     pub fn view(
         auth: AuthState,
         user_data: Entity<UserData>,
-        upload_manager: Entity<UploadManager>,
+        transfer_manager: Entity<TransferManager>,
         nav: Navigation,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| Self::new(auth, user_data, upload_manager, nav, window, cx))
+        cx.new(|cx| Self::new(auth, user_data, transfer_manager, nav, window, cx))
     }
 }
 
@@ -226,8 +226,8 @@ impl HomeUi {
                             m.space.description.clone()
                         };
 
-                        let space_id = m.space.id.clone();
-                        let folder_id = m.folder.clone();
+                        let space_id = m.space.id;
+                        let folder_id = m.folder;
 
                         div()
                             .id(SharedString::new(m.space.id.to_string()))
@@ -287,8 +287,8 @@ impl HomeUi {
                                             this.auth.clone(),
                                             this.user_data.clone(),
                                             this.nav.clone(),
-                                            this.upload_manager.clone(),
-                                            NavState::new(space_id.clone(), folder_id.clone()),
+                                            this.transfer_manager.clone(),
+                                            NavState::new(space_id, folder_id),
                                             window,
                                             cx,
                                         ),

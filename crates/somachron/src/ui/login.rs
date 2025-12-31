@@ -28,16 +28,11 @@ impl LoginUi {
         let email_input = cx.new(|cx| InputState::new(window, cx).placeholder("user@email.com"));
         let otp_input = cx.new(|cx| OtpState::new(6, window, cx));
 
-        let otp_sub = cx.subscribe_in(
-            &otp_input,
-            window,
-            |this, _, event, window, cx| match event {
-                gpui_component::input::InputEvent::Change => {
-                    this.verify_otp(window, cx);
-                }
-                _ => (),
-            },
-        );
+        let otp_sub = cx.subscribe_in(&otp_input, window, |this, _, event, window, cx| {
+            if let gpui_component::input::InputEvent::Change = event {
+                this.verify_otp(window, cx);
+            }
+        });
 
         Self {
             auth,

@@ -83,14 +83,14 @@ impl MediaState {
         match iter.nth(index) {
             Some(ElementType::File(file)) => Some((index, file.clone())),
             _ => {
-                while let Some(element) = iter.next() {
+                for element in iter {
                     index += 1;
                     if let ElementType::File(file) = element {
                         return Some((index, file.clone()));
                     }
                 }
 
-                return None;
+                None
             }
         }
     }
@@ -107,7 +107,7 @@ impl MediaState {
                     }
                 }
 
-                return None;
+                None
             }
         }
     }
@@ -122,7 +122,7 @@ impl MediaState {
 
     pub fn set_files(&mut self, files: Vec<FileMetaReponse>) {
         self.asset_states = files.iter().fold(HashMap::new(), |mut acc, file| {
-            acc.insert(file.id.clone(), MediaAssetState::Idle);
+            acc.insert(file.id, MediaAssetState::Idle);
             acc
         });
 
@@ -186,12 +186,10 @@ impl MediaState {
 
                         start = i;
                         used_width = fw;
+                    } else if used_width.is_zero() {
+                        used_width += fw;
                     } else {
-                        if used_width.is_zero() {
-                            used_width += fw;
-                        } else {
-                            used_width += MEDIA_GAP + fw;
-                        }
+                        used_width += MEDIA_GAP + fw;
                     }
                 }
                 ElementType::Section(date) => {

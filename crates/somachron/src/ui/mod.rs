@@ -4,7 +4,7 @@ use header::HeaderUi;
 
 use crate::{
     auth::{Auth, AuthClientEvent, AuthEvent, AuthState, SessionState},
-    entities::{UserData, nav::NavStack, upload::UploadManager},
+    entities::{UserData, nav::NavStack, transfer::TransferManager},
     rt,
     ui::{home::HomeUi, login::LoginUi},
 };
@@ -49,12 +49,12 @@ impl Rooter {
         let auth = cx.new(|cx| Auth::init(cx));
         let user_state = cx.new(|_| UserData::new());
         let nav = cx.new(|_| NavStack::new());
-        let upload_manager = cx.new(|_cx| UploadManager::new());
+        let transfer_manager = cx.new(|_cx| TransferManager::new());
 
         let header_ui = HeaderUi::view(
             auth.clone(),
             user_state.clone(),
-            upload_manager.clone(),
+            transfer_manager.clone(),
             nav.clone(),
             window,
             cx,
@@ -63,7 +63,7 @@ impl Rooter {
         let home_ui = HomeUi::view(
             auth.clone(),
             user_state.clone(),
-            upload_manager.clone(),
+            transfer_manager.clone(),
             nav.clone(),
             window,
             cx,
@@ -208,11 +208,8 @@ impl Rooter {
         })
         .detach();
 
+        let inner = self.auth.read(cx).inner();
         cx.spawn_in(window, async move |this, cx| {
-            let inner = this
-                .read_with(cx, |this, cx| this.auth.read(cx).inner())
-                .unwrap();
-
             loop {
                 Timer::after(std::time::Duration::from_secs(40)).await;
 
@@ -243,6 +240,22 @@ impl Rooter {
                             cx,
                         );
                     });
+
+                    let _inner = inner.clone();
+                    let result = rt::spawn(cx, async move { _inner.has_session().await })
+                        .unwrap()
+                        .await;
+                    if let Ok(has_session) = result
+                        && !has_session
+                    {
+                        let _ = this.update(cx, |this, cx| {
+                            this.auth.update(cx, |auth, cx| {
+                                auth.save(cx);
+                                cx.emit(AuthEvent::Session(SessionState::LoggedOut));
+                            });
+                            cx.notify();
+                        });
+                    }
                 }
             }
         })

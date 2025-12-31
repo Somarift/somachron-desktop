@@ -35,7 +35,7 @@ pub fn comp<T: create_space_dialog::CreateSpaceDialog + 'static>(
                 .gap_2()
                 .children(user_spaces.iter().map(move |us| {
                     let entity = entity.clone();
-                    let nav_state = NavState::new(us.space.id.clone(), us.folder.clone());
+                    let nav_state = NavState::new(us.space.id, us.folder);
                     let on_space_select = on_space_select.clone();
 
                     div()

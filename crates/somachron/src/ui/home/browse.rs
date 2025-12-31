@@ -26,7 +26,7 @@ use crate::{
             PreviewAssetType, SECTION_HEIGHT,
         },
         nav::{NavEvent, NavId, NavState, Navigation},
-        upload::{UploadJob, UploadManager},
+        transfer::{TransferJob, TransferManager},
     },
     err::AppError,
     rt,
@@ -50,7 +50,7 @@ pub struct BrowseUi {
     auth: AuthState,
     user_data: Entity<UserData>,
     nav: Navigation,
-    upload_manager: Entity<UploadManager>,
+    transfer_manager: Entity<TransferManager>,
     render_bounds: Entity<RenderBounds>,
 
     current_nav: NavState,
@@ -75,7 +75,7 @@ impl BrowseUi {
         auth: AuthState,
         user_data: Entity<UserData>,
         nav: Navigation,
-        upload_manager: Entity<UploadManager>,
+        transfer_manager: Entity<TransferManager>,
         current_nav: NavState,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -121,7 +121,7 @@ impl BrowseUi {
             nav,
             render_bounds,
             current_nav,
-            upload_manager,
+            transfer_manager,
             folder: None,
             folders: Vec::new(),
             media_state,
@@ -141,7 +141,7 @@ impl BrowseUi {
         auth: AuthState,
         user_data: Entity<UserData>,
         nav: Navigation,
-        upload_manager: Entity<UploadManager>,
+        transfer_manager: Entity<TransferManager>,
         current_nav: NavState,
         window: &mut Window,
         cx: &mut App,
@@ -151,7 +151,7 @@ impl BrowseUi {
                 auth,
                 user_data,
                 nav,
-                upload_manager,
+                transfer_manager,
                 current_nav.for_browse(),
                 window,
                 cx,
@@ -359,7 +359,7 @@ impl BrowseUi {
                 return Ok(thumbnail_file);
             }
 
-            let file_id = _file.id.clone();
+            let file_id = _file.id;
             let th_path = thumbnail_file.clone();
             let result = inner
                 .get_token()
@@ -372,7 +372,7 @@ impl BrowseUi {
                 .map_async(async move |urls| api::download(urls.url, th_path).await)
                 .await;
 
-            if let Err(_) = result {
+            if result.is_err() {
                 let _ = tokio::fs::remove_file(&thumbnail_file).await;
             }
 
@@ -386,21 +386,21 @@ impl BrowseUi {
                 match result {
                     Ok(th_path) => {
                         this.media_state.update(cx, |ms, _cx| {
-                            ms.asset_mut(&file.id).map(|u| {
+                            if let Some(u) = ms.asset_mut(&file.id) {
                                 *u = MediaAssetState::Loaded {
                                     thumbnail_path: th_path.clone(),
                                     preview_asset_ty: PreviewAssetType::Loading,
                                 };
-                            });
+                            }
                         });
 
                         this.__fetch_preview_url(window, cx, file, th_path);
                     }
                     Err(err) => {
                         this.media_state.update(cx, |ms, _cx| {
-                            ms.asset_mut(&file.id).map(|u| {
+                            if let Some(u) = ms.asset_mut(&file.id) {
                                 *u = MediaAssetState::Error;
-                            });
+                            }
                         });
                         window.push_notification(Notification::error(err.message), cx);
                     }
@@ -435,7 +435,7 @@ impl BrowseUi {
                 return Ok(PreviewAssetType::Preview(preview_file));
             }
 
-            let file_id = _file.id.clone();
+            let file_id = _file.id;
             let pr_path = preview_file.clone();
             let result = inner
                 .get_token()
@@ -455,7 +455,7 @@ impl BrowseUi {
                 })
                 .await;
 
-            if let Err(_) = result {
+            if result.is_err() {
                 let _ = tokio::fs::remove_file(&preview_file).await;
             }
 
@@ -469,12 +469,12 @@ impl BrowseUi {
                 match result {
                     Ok(pr_ty) => {
                         this.media_state.update(cx, |ms, _cx| {
-                            ms.asset_mut(&file.id).map(|u| {
+                            if let Some(u) = ms.asset_mut(&file.id) {
                                 *u = MediaAssetState::Loaded {
                                     thumbnail_path,
                                     preview_asset_ty: pr_ty,
                                 };
-                            });
+                            }
                         });
                     }
                     Err(err) => {
@@ -575,7 +575,11 @@ impl BrowseUi {
                                             .flex()
                                             .flex_col()
                                             .gap_2()
-                                            .children(paths.iter().cloned().map(|p| {
+                                            .child(div().font_medium().child(format!(
+                                                "Upload the following {} file(s) ?",
+                                                paths.len()
+                                            )))
+                                            .children(paths.iter().map(|p| {
                                                 div()
                                                     .px_2()
                                                     .py_1()
@@ -614,19 +618,22 @@ impl BrowseUi {
                                                 let paths = paths.clone();
                                                 let _ = entity.update(cx, |this, cx| {
                                                     if let Some(folder) = this.folder.as_ref() {
-                                                        this.upload_manager.update(cx, |um, cx| {
-                                                            um.push(
-                                                                UploadJob::new(
-                                                                    paths,
-                                                                    this.current_nav
-                                                                        .space_id()
-                                                                        .clone(),
-                                                                    folder.clone(),
+                                                        this.transfer_manager.update(
+                                                            cx,
+                                                            |um, cx| {
+                                                                um.push(
+                                                                    TransferJob::upload(
+                                                                        paths,
+                                                                        *this
+                                                                            .current_nav
+                                                                            .space_id(),
+                                                                        folder.clone(),
+                                                                        cx,
+                                                                    ),
                                                                     cx,
-                                                                ),
-                                                                cx,
-                                                            );
-                                                        });
+                                                                );
+                                                            },
+                                                        );
                                                     }
                                                 });
                                             });
@@ -646,6 +653,75 @@ impl BrowseUi {
                     });
                 }
                 _ => {}
+            };
+        })
+        .detach();
+    }
+
+    fn open_download(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let path = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(SharedString::new_static("Select destination folder")),
+        });
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = path.await;
+
+            let result = match result {
+                Ok(r) => r,
+                Err(err) => {
+                    let _ = this.update_in(cx, |_this, window, cx| {
+                        window.push_notification(
+                            Notification::warning(format!("{err}")).title("No folder selected"),
+                            cx,
+                        );
+                    });
+                    return;
+                }
+            };
+
+            match result {
+                Ok(Some(paths)) => {
+                    let dst_path = match paths.into_iter().next() {
+                        Some(path) => path,
+                        None => {
+                            let _ = this.update_in(cx, |_this, window, cx| {
+                                window.push_notification(
+                                    Notification::warning("No folder selected"),
+                                    cx,
+                                );
+                            });
+                            return;
+                        }
+                    };
+
+                    let _ = this.update(cx, |this, cx| {
+                        this.transfer_manager.update(cx, |um, cx| {
+                            um.push(
+                                TransferJob::download(
+                                    dst_path,
+                                    std::mem::take(&mut this.file_checked),
+                                    *this.current_nav.space_id(),
+                                    cx,
+                                ),
+                                cx,
+                            );
+                            cx.notify();
+                        });
+                        cx.notify();
+                    });
+                }
+                Err(err) => {
+                    let _ = this.update_in(cx, |_this, window, cx| {
+                        window.push_notification(
+                            Notification::error(format!("{err}")).title("Download cancelled"),
+                            cx,
+                        );
+                    });
+                }
+                _ => (),
             };
         })
         .detach();
@@ -756,7 +832,7 @@ impl delete_dialog::DeleteDialog for BrowseUi {
                                 err_message.push_str(name.as_str());
                                 err_message.push_str(": ");
                                 err_message.push_str(&err.message);
-                                err_message.push_str("\n");
+                                err_message.push('\n');
                             }
                         }
 
@@ -841,7 +917,7 @@ impl Render for BrowseUi {
                     .flex()
                     .flex_col()
                     .size_full()
-                    .when(self.file_checked.len() > 0, |this| {
+                    .when(!self.file_checked.is_empty(), |this| {
                         this.child(self.render_selections(cx))
                     })
                     .child(deferred(self.render_browse_status(cx)).with_priority(999))
@@ -887,7 +963,9 @@ impl Render for BrowseUi {
                     move |el_bounds, _d, _w, cx| {
                         this.update(cx, |this, cx| {
                             this.render_bounds.update(cx, |bounds, cx| {
-                                bounds.h_event(el_bounds.size.height).map(|ev| cx.emit(ev));
+                                if let Some(ev) = bounds.h_event(el_bounds.size.height) {
+                                    cx.emit(ev);
+                                }
                             })
                         });
                     },
@@ -1009,7 +1087,7 @@ impl BrowseUi {
     }
 
     fn render_sidebar_folder_item(folder: FolderResponse, cx: &Context<Self>) -> SidebarMenuItem {
-        let folder_id = folder.id.clone();
+        let folder_id = folder.id;
         let folder_name = folder.name.clone();
         let entity = cx.weak_entity();
 
@@ -1048,7 +1126,7 @@ impl BrowseUi {
                                             dialog,
                                             entity.clone(),
                                             delete_dialog::DeleteType::Folder((
-                                                folder_id.clone(),
+                                                folder_id,
                                                 folder_name.clone(),
                                             )),
                                             cx,
@@ -1065,7 +1143,7 @@ impl BrowseUi {
                             this.auth.clone(),
                             this.user_data.clone(),
                             this.nav.clone(),
-                            this.upload_manager.clone(),
+                            this.transfer_manager.clone(),
                             this.current_nav.clone().with_folder(folder_id),
                             window,
                             cx,
@@ -1115,8 +1193,6 @@ impl BrowseUi {
                     .small()
                     .disabled(self.loading_folders)
                     .on_click(cx.listener(|this, _ev, window, cx| {
-                        // window.prompt(level, message, detail, answers, cx)
-
                         this.open_upload(window, cx);
                     })),
             )
@@ -1132,6 +1208,17 @@ impl BrowseUi {
             .py_1p5()
             .w_full()
             .justify_between()
+            .child(
+                Button::new("download_files")
+                    .primary()
+                    .icon(Icon::empty().path("icons/download.svg"))
+                    .label(format!("Download {} files", self.file_checked.len()))
+                    .small()
+                    .disabled(self.loading_folders)
+                    .on_click(cx.listener(|this, _ev, window, cx| {
+                        this.open_download(window, cx);
+                    })),
+            )
             .child(
                 h_flex()
                     .id("selection_header")
@@ -1167,7 +1254,7 @@ impl BrowseUi {
                                 .read_with(cx, |this, _cx| {
                                     this.file_checked
                                         .iter()
-                                        .map(|(id, name)| (id.clone(), name.clone()))
+                                        .map(|(id, name)| (*id, name.clone()))
                                         .collect()
                                 })
                                 .unwrap_or_default();
@@ -1370,8 +1457,7 @@ impl BrowseUi {
                                     cx.stop_propagation();
 
                                     if *checked {
-                                        this.file_checked
-                                            .insert(file.id.clone(), file.file_name.clone());
+                                        this.file_checked.insert(file.id, file.file_name.clone());
                                     } else {
                                         this.file_checked.remove(&file.id);
                                     }

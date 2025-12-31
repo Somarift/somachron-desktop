@@ -156,7 +156,7 @@ impl InnerAuth {
     pub async fn setup_client(&self) -> Result<(), AppError> {
         {
             let rl = self.client_id.read().await;
-            if let Some(_) = &*rl {
+            if (*rl).is_some() {
                 return Ok(());
             }
         }
@@ -456,9 +456,9 @@ impl InnerAuth {
         let rl = self.cookies.read().await;
         rl.iter().fold(String::from(""), |mut acc, (k, v)| {
             acc.push_str(k.as_str());
-            acc.push_str("=");
+            acc.push('=');
             acc.push_str(v.value.as_str());
-            acc.push_str(";");
+            acc.push(';');
             acc
         })
     }
@@ -495,7 +495,7 @@ fn extract_cookies(headers: &reqwest::header::HeaderMap) -> HashMap<String, Cook
     for cookie in headers.get_all(SET_COOKIE_HEADER).into_iter() {
         let cookie_str = cookie.to_str().unwrap();
 
-        if let Some(cookie) = cookie_str.split(';').nth(0) {
+        if let Some(cookie) = cookie_str.split(';').next() {
             let parts = cookie.split('=').collect::<Vec<_>>();
             cookies.insert(
                 parts[0].to_owned(),

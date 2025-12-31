@@ -41,9 +41,9 @@ pub fn human_readable_size(bytes: i64) -> gpui::SharedString {
     .into()
 }
 
-///
-/// ------- Yanked from https://github.com/zed-industries/zed/blob/main/crates/client/src/telemetry.rs
-///
+//
+// ------- Yanked from https://github.com/zed-industries/zed/blob/main/crates/client/src/telemetry.rs
+//
 
 pub fn os_name() -> String {
     #[cfg(target_os = "macos")]
@@ -75,7 +75,7 @@ pub fn os_version() -> String {
     {
         use objc2_foundation::NSProcessInfo;
         let process_info = NSProcessInfo::processInfo();
-        let version_nsstring = unsafe { process_info.operatingSystemVersionString() };
+        let version_nsstring = process_info.operatingSystemVersionString();
         // "Version 15.6.1 (Build 24G90)" -> "15.6.1 (Build 24G90)"
         let version_string = version_nsstring.to_string().replace("Version ", "");
         // "15.6.1 (Build 24G90)" -> "15.6.1"

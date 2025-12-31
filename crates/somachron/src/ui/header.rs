@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use futures::StreamExt;
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::collapsible::Collapsible;
 use gpui_component::tooltip::Tooltip;
@@ -16,13 +15,13 @@ use gpui_component::{
 };
 use uuid::Uuid;
 
-use crate::entities::upload::UploadJobStatus;
+use crate::entities::transfer::{DownloadJob, JobStatus, UploadJob, UrlState};
 use crate::{
-    auth::{AuthEvent, AuthState, InnerAuth},
+    auth::{AuthEvent, AuthState},
     entities::{
         UserData,
         nav::{NavEvent, NavState, Navigation},
-        upload::{UploadJob, UploadManager, UploadUrlState},
+        transfer::{TransferJob, TransferManager},
     },
     rt,
     theme::*,
@@ -31,7 +30,7 @@ use crate::{
         home::browse::BrowseUi,
     },
     util::MapAsync,
-    web::api::{self, models::cloud::res::InitiateUploadResponse},
+    web::api,
 };
 
 actions!(header, [EmptyAction, ClearJobs]);
@@ -44,13 +43,13 @@ pub struct HeaderUi {
     auth: AuthState,
     user_data: Entity<UserData>,
     nav: Navigation,
-    upload_manager: Entity<UploadManager>,
+    transfer_manager: Entity<TransferManager>,
 
     logged_in: bool,
     loading_spaces: bool,
     loading_user: bool,
     creating_space: bool,
-    upload_running: bool,
+    jobs_running: bool,
     job_view_collapsible: Entity<JobViewCollapsible>,
 
     _subscriptions: Vec<Subscription>,
@@ -60,33 +59,34 @@ impl HeaderUi {
     pub fn new(
         auth: AuthState,
         user_data: Entity<UserData>,
-        upload_manager: Entity<UploadManager>,
+        transfer_manager: Entity<TransferManager>,
         nav: Navigation,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let job_view_collapsible = cx.new(|_cx| JobViewCollapsible { opened: Vec::new() });
 
-        let upload_sub = cx.subscribe_in(&upload_manager, window, |this, _, _ev, window, cx| {
-            let opened = this
-                .upload_manager
-                .read(cx)
-                .jobs()
-                .iter()
-                .map(|_| false)
-                .collect::<Vec<_>>();
+        let transfer_sub =
+            cx.subscribe_in(&transfer_manager, window, |this, _, _ev, window, cx| {
+                let opened = this
+                    .transfer_manager
+                    .read(cx)
+                    .jobs()
+                    .iter()
+                    .map(|_| false)
+                    .collect::<Vec<_>>();
 
-            this.job_view_collapsible.update(cx, |jb, cx| {
-                jb.opened = opened;
-                cx.notify();
+                this.job_view_collapsible.update(cx, |jb, cx| {
+                    jb.opened = opened;
+                    cx.notify();
+                });
+
+                this.process_jobs(window, cx);
             });
 
-            this.process_upload(window, cx);
-        });
-
         let auth_sub = cx.subscribe_in(&auth, window, |this, _, event, window, cx| {
-            match event {
-                crate::auth::AuthEvent::Session(session_state) => match session_state {
+            if let crate::auth::AuthEvent::Session(session_state) = event {
+                match session_state {
                     crate::auth::SessionState::SignedIn => {
                         this.logged_in = true;
 
@@ -94,15 +94,16 @@ impl HeaderUi {
                         this.fetch_spaces(None, window, cx);
                     }
                     crate::auth::SessionState::LoggedOut => {
+                        this.logged_in = false;
+
                         this.user_data.update(cx, |state, cx| {
                             state.reset();
                             cx.notify();
                         });
                     }
                     _ => (),
-                },
-                _ => (),
-            };
+                };
+            }
         });
 
         let nav_sub = cx.subscribe_in(&nav, window, |this, _entity, event, window, cx| {
@@ -112,7 +113,7 @@ impl HeaderUi {
                     this.fetch_spaces(None, window, cx);
                 }
                 NavEvent::NewSpace(space_id) => {
-                    this.fetch_spaces(Some(space_id.clone()), window, cx);
+                    this.fetch_spaces(Some(*space_id), window, cx);
                 }
                 _ => (),
             };
@@ -122,26 +123,26 @@ impl HeaderUi {
             auth,
             user_data,
             nav,
-            upload_manager,
+            transfer_manager,
             logged_in: false,
             loading_spaces: false,
             loading_user: false,
             creating_space: false,
-            upload_running: false,
+            jobs_running: false,
             job_view_collapsible,
-            _subscriptions: vec![auth_sub, nav_sub, upload_sub],
+            _subscriptions: vec![auth_sub, nav_sub, transfer_sub],
         }
     }
 
     pub fn view(
         auth: AuthState,
         user_data: Entity<UserData>,
-        upload_manager: Entity<UploadManager>,
+        transfer_manager: Entity<TransferManager>,
         nav: Navigation,
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        cx.new(|cx| Self::new(auth, user_data, upload_manager, nav, window, cx))
+        cx.new(|cx| Self::new(auth, user_data, transfer_manager, nav, window, cx))
     }
 
     fn change_mode(&mut self, _: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -231,7 +232,7 @@ impl HeaderUi {
                                         this.auth.clone(),
                                         this.user_data.clone(),
                                         this.nav.clone(),
-                                        this.upload_manager.clone(),
+                                        this.transfer_manager.clone(),
                                         NavState::new(user_space.space.id, user_space.folder),
                                         window,
                                         cx,
@@ -269,10 +270,12 @@ impl HeaderUi {
 
             let _ = this.update_in(cx, |this, window, cx| {
                 match result {
-                    Ok(_) => this.auth.update(cx, |auth, cx| {
-                        auth.save(cx);
-                        cx.emit(AuthEvent::Session(crate::auth::SessionState::LoggedOut));
-                    }),
+                    Ok(_) => {
+                        this.auth.update(cx, |auth, cx| {
+                            auth.save(cx);
+                            cx.emit(AuthEvent::Session(crate::auth::SessionState::LoggedOut));
+                        });
+                    }
                     Err(err) => window.push_notification(
                         Notification::error(err.message).title("Failed to log out"),
                         cx,
@@ -284,20 +287,20 @@ impl HeaderUi {
         .detach();
     }
 
-    fn process_upload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.upload_running {
+    fn process_jobs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.jobs_running {
             return;
         }
 
-        self.upload_running = true;
+        self.jobs_running = true;
         cx.notify();
 
-        tracing::info!(msg = "starting upload loop");
+        tracing::info!(msg = "Starting job loop");
 
         cx.spawn_in(window, async move |this, cx| {
             loop {
                 let jobs_result = this.read_with(cx, |this, cx| {
-                    this.upload_manager.read(cx).next(cx).cloned()
+                    this.transfer_manager.read(cx).next(cx).cloned()
                 });
 
                 let Ok(inner) = this.read_with(cx, |this, cx| this.auth.read(cx).inner()) else {
@@ -306,27 +309,25 @@ impl HeaderUi {
 
                 match jobs_result {
                     Ok(jobs) => match jobs {
-                        Some(job) => {
+                        Some(TransferJob::Upload(job)) => {
                             let _ = this.update_in(cx, |_this, window, cx| {
                                 window.push_notification(Notification::info("Upload started"), cx);
                                 job.clone().update(cx, |job, cx| {
-                                    job.status = UploadJobStatus::InProgress;
+                                    job.status = JobStatus::InProgress;
                                     cx.notify();
                                 });
                             });
 
-                            Self::initialize_uploads(inner.clone(), job.clone(), cx).await;
-
-                            Self::upload_files(inner, job.clone(), cx).await;
+                            UploadJob::initialize_uploads(inner.clone(), job.clone(), cx).await;
+                            UploadJob::upload_files(inner, job.clone(), cx).await;
 
                             let _ = this.update(cx, |this, cx| {
-                                let space_id = job.read(cx).space_id.clone();
-                                let folder_id = job.read(cx).folder.id.clone();
+                                let space_id = job.read(cx).space_id;
+                                let folder_id = job.read(cx).folder.id;
 
                                 this.nav.update(cx, |_nav, cx| {
                                     cx.emit(NavEvent::RefreshView(NavState::new(
-                                        space_id.clone(),
-                                        folder_id,
+                                        space_id, folder_id,
                                     )));
                                 });
 
@@ -334,9 +335,35 @@ impl HeaderUi {
                                     if job
                                         .uploads
                                         .iter()
-                                        .all(|u| matches!(u.url_state, UploadUrlState::Done))
+                                        .all(|u| matches!(u.url_state, UrlState::Done))
                                     {
-                                        job.status = UploadJobStatus::Done;
+                                        job.status = JobStatus::Done;
+                                    }
+                                    cx.notify();
+                                });
+                            });
+                        }
+                        Some(TransferJob::Download(job)) => {
+                            let _ = this.update_in(cx, |_this, window, cx| {
+                                window
+                                    .push_notification(Notification::info("Download started"), cx);
+                                job.clone().update(cx, |job, cx| {
+                                    job.status = JobStatus::InProgress;
+                                    cx.notify();
+                                });
+                            });
+
+                            DownloadJob::initialize_downloads(inner.clone(), job.clone(), cx).await;
+                            DownloadJob::download_files(job.clone(), cx).await;
+
+                            let _ = this.update(cx, |_this, cx| {
+                                job.clone().update(cx, |job, cx| {
+                                    if job
+                                        .downloads
+                                        .iter()
+                                        .all(|u| matches!(u.url_state, UrlState::Done))
+                                    {
+                                        job.status = JobStatus::Done;
                                     }
                                     cx.notify();
                                 });
@@ -347,8 +374,7 @@ impl HeaderUi {
                     Err(err) => {
                         let _ = this.update_in(cx, |_this, window, cx| {
                             window.push_notification(
-                                Notification::error(format!("{err}"))
-                                    .title("Failed to handle upload jobs"),
+                                Notification::error(format!("{err}")).title("Failed to handle job"),
                                 cx,
                             );
                         });
@@ -360,142 +386,11 @@ impl HeaderUi {
 
             tracing::info!(msg = "No jobs.. loop complete");
             let _ = this.update(cx, |this, cx| {
-                this.upload_running = false;
+                this.jobs_running = false;
                 cx.notify();
             });
         })
         .detach();
-    }
-
-    async fn initialize_uploads(
-        inner: Arc<InnerAuth>,
-        job: Entity<UploadJob>,
-        cx: &mut AsyncWindowContext,
-    ) {
-        let tasks = job
-            .read_with(cx, |this, cx| {
-                let job = job.clone();
-                let folder_id = this.folder.id;
-                let space_id = this.space_id;
-
-                this.uploads
-                    .iter()
-                    .enumerate()
-                    .map(|(i, state)| {
-                        let inner = inner.clone();
-                        let job = job.clone();
-
-                        let file_name = state
-                            .path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .map(|s| s.to_owned())
-                            .unwrap_or_default();
-
-                        let task = rt::spawn(cx, async move {
-                            inner
-                                .get_token()
-                                .await
-                                .map_async(async move |token| {
-                                    api::cloud::init_file_upload(
-                                        &token, &space_id, &folder_id, &file_name,
-                                    )
-                                    .await
-                                })
-                                .await
-                        });
-
-                        cx.spawn(async move |cx| {
-                            let result = task.await.flatten();
-                            let _ = job.update(cx, |job, cx| {
-                                job.uploads.get_mut(i).map(|u| match result {
-                                    Ok(data) => u.url_state = UploadUrlState::Uploading(data),
-                                    Err(err) => u.url_state = UploadUrlState::Error(err),
-                                });
-                                cx.notify();
-                            });
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        cx.spawn(async move |_cx| {
-            let _ = futures::stream::iter(tasks)
-                .buffer_unordered(8)
-                .collect::<Vec<_>>()
-                .await;
-        })
-        .await;
-    }
-
-    async fn upload_files(
-        inner: Arc<InnerAuth>,
-        job: Entity<UploadJob>,
-        cx: &mut AsyncWindowContext,
-    ) {
-        let tasks = job
-            .update(cx, |this, cx| {
-                let folder_id = this.folder.id;
-                let space_id = this.space_id;
-
-                this.uploads
-                    .iter_mut()
-                    .enumerate()
-                    .filter_map(|(i, state)| {
-                        let job = job.clone();
-                        let inner = inner.clone();
-                        let path = state.path.clone();
-
-                        if let UploadUrlState::Uploading(data) = &state.url_state {
-                            let InitiateUploadResponse { url, file_name } = data.clone();
-
-                            let task = rt::spawn(cx, async move {
-                                api::upload(url.as_str(), path)
-                                    .await
-                                    .map_async(async move |data| {
-                                        inner.get_token().await.map(|token| (token, data.0, data.1))
-                                    })
-                                    .await
-                                    .map_async(async move |(token, file_size, updated_millis)| {
-                                        api::cloud::complete_file_upload(
-                                            &token,
-                                            &space_id,
-                                            &folder_id,
-                                            file_name.as_str(),
-                                            file_size,
-                                            updated_millis,
-                                        )
-                                        .await
-                                    })
-                                    .await
-                            });
-
-                            Some(cx.spawn(async move |_this, cx| {
-                                let result = task.await.flatten();
-                                let _ = job.update(cx, |job, cx| {
-                                    job.uploads.get_mut(i).map(|u| match result {
-                                        Ok(_) => u.url_state = UploadUrlState::Done,
-                                        Err(err) => u.url_state = UploadUrlState::Error(err),
-                                    });
-                                    cx.notify();
-                                });
-                            }))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-
-        cx.spawn(async move |_cx| {
-            let _ = futures::stream::iter(tasks)
-                .buffer_unordered(8)
-                .collect::<Vec<_>>()
-                .await;
-        })
-        .await;
     }
 }
 
@@ -576,7 +471,7 @@ impl Render for HeaderUi {
             .child(
                 div()
                     .on_action(cx.listener(|this, _: &ClearJobs, _window, cx| {
-                        this.upload_manager.update(cx, |um, cx| {
+                        this.transfer_manager.update(cx, |um, cx| {
                             um.trim_completed(cx);
                             cx.notify();
                         });
@@ -585,9 +480,9 @@ impl Render for HeaderUi {
                     .flex()
                     .gap_1()
                     .items_center()
-                    .child(self.render_upload_popup(cx))
                     .when(self.logged_in, |this| {
-                        this.child(self.render_user_popup(cx))
+                        this.child(self.render_transfer_popup(cx))
+                            .child(self.render_user_popup(cx))
                     })
                     .child(theme_toggle),
             )
@@ -604,6 +499,9 @@ impl HeaderUi {
             .small()
             .size_6()
             .ghost()
+            .on_click(|_ev, _window, cx| {
+                cx.stop_propagation();
+            })
             .map(|this| match self.user_data.read(cx).user.as_ref() {
                 Some(user) => {
                     let user = user.clone();
@@ -649,16 +547,21 @@ impl HeaderUi {
                         .separator()
                         .menu_element(
                             Box::new(EmptyAction),
-                            move |_window, _cx| {
+                            move |_window, cx| {
                                 let entity = entity.clone();
 
-                                div()
-                                    .id("logout")
-                                    .flex()
-                                    .gap_2()
-                                    .items_center()
-                                    .child(Icon::empty().path("icons/log-out.svg"))
-                                    .child(div().child("Logout").text_sm())
+                                Button::new("logout")
+                                    .w_full()
+                                    .small()
+                                    .icon(Icon::empty().path("icons/log-out.svg"))
+                                    .label("Logout")
+                                    .ghost()
+                                    .disabled(
+                                        entity
+                                            .clone()
+                                            .read_with(cx, |this, _cx| this.jobs_running)
+                                            .unwrap_or_default(),
+                                    )
                                     .on_click(move |_ev, window, cx| {
                                         cx.stop_propagation();
 
@@ -680,13 +583,7 @@ impl HeaderUi {
                 .read(cx)
                 .user_spaces
                 .iter()
-                .find_map(|us| {
-                    if &us.space.id == sp_id {
-                        Some(us)
-                    } else {
-                        None
-                    }
-                })
+                .find(|us| &us.space.id == sp_id)
                 .cloned()
         });
         let entity = cx.weak_entity();
@@ -762,7 +659,7 @@ impl HeaderUi {
                                                         this.auth.clone(),
                                                         this.user_data.clone(),
                                                         this.nav.clone(),
-                                                        this.upload_manager.clone(),
+                                                        this.transfer_manager.clone(),
                                                         state,
                                                         window,
                                                         cx,
@@ -807,13 +704,13 @@ impl HeaderUi {
             })
     }
 
-    fn render_upload_popup(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_transfer_popup(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let entity = cx.weak_entity();
 
         Button::new("upld")
-            .icon(Icon::empty().path("icons/upload.svg"))
+            .icon(Icon::empty().path("icons/arrow-up-down.svg"))
             .small()
-            .outline()
+            .ghost()
             .mr_1()
             .on_click(|_ev, _window, cx| {
                 cx.stop_propagation();
@@ -824,7 +721,7 @@ impl HeaderUi {
                 let (jobs, collapsible) = entity
                     .read_with(cx, |this, cx| {
                         (
-                            this.upload_manager.read(cx).jobs().clone(),
+                            this.transfer_manager.read(cx).jobs().clone(),
                             this.job_view_collapsible.clone(),
                         )
                     })
@@ -832,7 +729,7 @@ impl HeaderUi {
 
                 let mut menu = menu.max_w(px(512.));
                 if jobs.is_empty() {
-                    return menu.menu("No upload jobs", Box::new(EmptyAction));
+                    return menu.menu("No sync jobs", Box::new(EmptyAction));
                 }
 
                 for (i, job) in jobs.into_iter().enumerate() {
@@ -858,42 +755,70 @@ impl HeaderUi {
                                         .items_center()
                                         .justify_between()
                                         .gap_2()
-                                        .child(format!(
-                                            "{}: {}",
-                                            match job.read(cx).status {
-                                                UploadJobStatus::Queued => "Queued",
-                                                UploadJobStatus::InProgress => "Uploading",
-                                                UploadJobStatus::Done => "Completed",
-                                            },
-                                            job.read(cx).folder.path.clone()
-                                        ))
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_2()
+                                                .map(|this| match job {
+                                                    TransferJob::Upload(_) => this.child(
+                                                        Icon::empty()
+                                                            .path("icons/upload.svg")
+                                                            .small()
+                                                            .text_color(cx.theme().primary),
+                                                    ),
+                                                    TransferJob::Download(_) => this.child(
+                                                        Icon::empty()
+                                                            .path("icons/download.svg")
+                                                            .small()
+                                                            .text_color(cx.theme().primary),
+                                                    ),
+                                                })
+                                                .child(job.summary(cx)),
+                                        )
                                         .child(
                                             Button::new(SharedString::new(format!("btn-cl-{i}")))
                                                 .icon(IconName::ChevronsUpDown)
                                                 .small()
                                                 .outline()
+                                                .shadow_none()
                                                 .on_click(move |_ev, _window, cx| {
                                                     cx.stop_propagation();
 
                                                     cl.update(cx, |cl, cx| {
-                                                        cl.opened.get_mut(i).map(|o| *o = !*o);
+                                                        if let Some(o) = cl.opened.get_mut(i) {
+                                                            *o = !*o;
+                                                        }
                                                         cx.notify();
                                                     });
                                                 }),
                                         ),
                                 )
                                 .content(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .max_h_112()
-                                        .min_w_112()
-                                        .gap_2()
-                                        .child(Self::render_job_menu_view(i, job.clone(), cx))
-                                        .child(div().child(format!(
-                                            "Total items: {}",
-                                            job.read(cx).uploads.len()
-                                        ))),
+                                    div().flex().flex_col().max_h_112().min_w_112().gap_2().map(
+                                        |this| match job.clone() {
+                                            TransferJob::Upload(job) => this
+                                                .child(Self::render_upload_job_menu_view(
+                                                    i,
+                                                    job.clone(),
+                                                    cx,
+                                                ))
+                                                .child(div().child(format!(
+                                                    "Total items: {}",
+                                                    job.read(cx).uploads.len()
+                                                ))),
+                                            TransferJob::Download(job) => this
+                                                .child(Self::render_download_job_menu_view(
+                                                    i,
+                                                    job.clone(),
+                                                    cx,
+                                                ))
+                                                .child(div().child(format!(
+                                                    "Total items: {}",
+                                                    job.read(cx).downloads.len()
+                                                ))),
+                                        },
+                                    ),
                                 )
                         })
                         .separator();
@@ -910,7 +835,7 @@ impl HeaderUi {
             })
     }
 
-    fn render_job_menu_view(i: usize, job: Entity<UploadJob>, cx: &App) -> impl IntoElement {
+    fn render_upload_job_menu_view(i: usize, job: Entity<UploadJob>, cx: &App) -> impl IntoElement {
         div()
             .id(SharedString::new(i.to_string()))
             .h_full()
@@ -929,7 +854,8 @@ impl HeaderUi {
                     .w_full()
                     .px_2()
                     .py_0p5()
-                    .rounded_l_lg()
+                    .rounded_lg()
+                    .border_b(px(0.5))
                     .bg(cx.theme().sidebar)
                     .child(
                         div()
@@ -948,14 +874,81 @@ impl HeaderUi {
                             ),
                     )
                     .map(|this| match &state.url_state {
-                        UploadUrlState::Queued => this.child(loading_icon(|icon| icon.size_4())),
-                        UploadUrlState::Uploading(_) => {
+                        UrlState::Queued => this.child(loading_icon(|icon| icon.size_4())),
+                        UrlState::Transferring(_) => {
                             this.child(Icon::empty().path("icons/upload.svg"))
                         }
-                        UploadUrlState::Done => {
+                        UrlState::Done => {
                             this.child(Icon::empty().path("icons/check.svg").text_color(green()))
                         }
-                        UploadUrlState::Error(err) => {
+                        UrlState::Error(err) => {
+                            let message = err.message.clone();
+                            this.child(
+                                div()
+                                    .id(SharedString::from(format!("err-{i}")))
+                                    .child(
+                                        Icon::new(IconName::CircleX).text_color(cx.theme().danger),
+                                    )
+                                    .tooltip(move |window, cx| {
+                                        Tooltip::new(message.clone()).build(window, cx)
+                                    }),
+                            )
+                        }
+                    })
+            }))
+    }
+
+    fn render_download_job_menu_view(
+        i: usize,
+        job: Entity<DownloadJob>,
+        cx: &App,
+    ) -> impl IntoElement {
+        div()
+            .id(SharedString::new(i.to_string()))
+            .h_full()
+            .overflow_y_scroll()
+            .w_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_1()
+            .justify_start()
+            .children(job.read(cx).downloads.iter().map(|state| {
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .w_full()
+                    .px_2()
+                    .py_0p5()
+                    .rounded_lg()
+                    .border_b(px(0.5))
+                    .bg(cx.theme().sidebar)
+                    .child(
+                        div()
+                            .text_sm()
+                            .max_w_64()
+                            .truncate()
+                            .text_ellipsis()
+                            .whitespace_normal()
+                            .child(
+                                state
+                                    .path
+                                    .file_name()
+                                    .and_then(|f| f.to_str())
+                                    .map(|s| s.to_owned())
+                                    .unwrap_or_default(),
+                            ),
+                    )
+                    .map(|this| match &state.url_state {
+                        UrlState::Queued => this.child(loading_icon(|icon| icon.size_4())),
+                        UrlState::Transferring(_) => {
+                            this.child(Icon::empty().path("icons/download.svg"))
+                        }
+                        UrlState::Done => {
+                            this.child(Icon::empty().path("icons/check.svg").text_color(green()))
+                        }
+                        UrlState::Error(err) => {
                             let message = err.message.clone();
                             this.child(
                                 div()

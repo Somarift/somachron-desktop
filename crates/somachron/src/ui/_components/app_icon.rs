@@ -1,7 +1,7 @@
 use gpui::*;
 use gpui_component::{ActiveTheme, Icon};
 
-pub fn comp(cx: &mut App, f: impl FnOnce(Icon) -> Icon) -> Div {
+pub fn comp(cx: &App, f: impl FnOnce(Icon) -> Icon) -> Div {
     let icon = icon(cx);
 
     div()
@@ -14,7 +14,7 @@ pub fn comp(cx: &mut App, f: impl FnOnce(Icon) -> Icon) -> Div {
         .child(f(icon))
 }
 
-pub fn icon<'a>(cx: &'a mut App) -> Icon {
+pub fn icon(cx: &App) -> Icon {
     Icon::new(Icon::empty())
         .text_color(cx.theme().primary_foreground)
         .path("icons/cloud-moon.svg")

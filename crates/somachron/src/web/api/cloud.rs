@@ -33,7 +33,7 @@ pub async fn list_gallery_files(
     token: &str,
     space_id: &Uuid,
 ) -> Result<Vec<FileMetaReponse>, AppError> {
-    super::get(format!("/media/lg"), token, Some(space_id)).await
+    super::get("/media/lg", token, Some(space_id)).await
 }
 
 pub async fn get_folder(
@@ -60,6 +60,14 @@ pub async fn get_preview_stream_url(
     super::get(format!("/media/stream/{file_id}"), token, Some(space_id)).await
 }
 
+pub async fn get_download_stream_url(
+    token: &str,
+    space_id: &Uuid,
+    file_id: &Uuid,
+) -> Result<StreamedUrlResponse, AppError> {
+    super::get(format!("/media/download/{file_id}"), token, Some(space_id)).await
+}
+
 pub async fn create_folder(
     token: &str,
     space_id: &Uuid,
@@ -68,7 +76,7 @@ pub async fn create_folder(
 ) -> Result<EmptyResponse, AppError> {
     super::post(
         "/media/mkdir",
-        &token,
+        token,
         Some(space_id),
         CreateFolderRequest {
             parent_folder_id: *folder_id,
@@ -83,7 +91,7 @@ pub async fn delete_folder(
     space_id: &Uuid,
     folder_id: &Uuid,
 ) -> Result<EmptyResponse, AppError> {
-    super::delete(format!("/media/rm/{folder_id}"), &token, Some(space_id)).await
+    super::delete(format!("/media/rm/{folder_id}"), token, Some(space_id)).await
 }
 
 pub async fn delete_file(
@@ -91,7 +99,7 @@ pub async fn delete_file(
     space_id: &Uuid,
     file_id: &Uuid,
 ) -> Result<EmptyResponse, AppError> {
-    super::delete(format!("/media/rmf/{file_id}"), &token, Some(space_id)).await
+    super::delete(format!("/media/rmf/{file_id}"), token, Some(space_id)).await
 }
 
 pub async fn init_file_upload(
@@ -102,7 +110,7 @@ pub async fn init_file_upload(
 ) -> Result<InitiateUploadResponse, AppError> {
     super::post(
         "/media/upload",
-        &token,
+        token,
         Some(space_id),
         InitiateUploadRequest {
             folder_id: *folder_id,

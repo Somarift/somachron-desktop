@@ -18,7 +18,7 @@ const API_URL: &str = "https://api-somachron.shank03.com/v1";
 pub const REQ_ID_HEADER: &str = "x-sc-id";
 const SPACE_ID_HEADER: &str = "X-Space-ID";
 
-static API_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| super::make_http_client());
+static API_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(super::make_http_client);
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct EmptyResponse {

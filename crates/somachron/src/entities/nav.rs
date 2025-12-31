@@ -100,7 +100,7 @@ impl NavStack {
         if self.ptr == 0 {
             return None;
         }
-        self.stack.iter().nth(self.ptr - 1)
+        self.stack.get(self.ptr - 1)
     }
 
     pub fn at_begining(&self) -> bool {
@@ -117,7 +117,7 @@ impl NavStack {
         self.drop_later_and_views();
 
         self.stack.push(view_id.clone());
-        if self.views.get(&view_id).is_none() {
+        if !self.views.contains_key(&view_id) {
             self.views.insert(view_id.clone(), view.into());
         }
 
@@ -131,7 +131,7 @@ impl NavStack {
     }
 
     pub fn back<T: 'static>(&mut self, cx: &mut Context<T>) {
-        self.ptr = self.ptr.checked_sub(1).unwrap_or(0);
+        self.ptr = self.ptr.saturating_sub(1);
         cx.notify();
     }
 
@@ -157,7 +157,7 @@ impl NavStack {
             if state.folder_id == folder_id {
                 // if there is view that is before current ptr, decrement it
                 if i + 1 < self.ptr {
-                    self.ptr = self.ptr.checked_sub(1).unwrap_or_default();
+                    self.ptr = self.ptr.saturating_sub(1);
                 }
                 entries.push(state.clone());
             } else {
@@ -185,7 +185,7 @@ impl NavStack {
         // drop views who's state not in stack
         let mut views = HashMap::new();
         for state in self.stack.iter() {
-            if let Some(_) = views.get(state) {
+            if views.contains_key(state) {
                 // we already have it
                 continue;
             }
