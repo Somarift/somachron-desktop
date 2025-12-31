@@ -42,9 +42,7 @@ pub fn comp<T: DeleteDialog + 'static>(
     deletion_ty: DeleteType,
     cx: &mut App,
 ) -> Dialog {
-    let is_loading = entity
-        .read_with(cx, |this, _cx| this.is_loading())
-        .unwrap_or_default();
+    let is_loading = entity.read_with(cx, |this, _cx| this.is_loading()).unwrap_or_default();
 
     let deletion_type = deletion_ty.get_type();
 

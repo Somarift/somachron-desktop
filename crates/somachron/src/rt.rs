@@ -13,11 +13,7 @@ impl Global for GlobalTokio {}
 impl GlobalTokio {
     pub fn new() -> Self {
         let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(
-                std::thread::available_parallelism()
-                    .map(|v| v.get())
-                    .unwrap_or(4),
-            )
+            .worker_threads(std::thread::available_parallelism().map(|v| v.get()).unwrap_or(4))
             .enable_all()
             .build()
             .expect("Failed to build tokio");

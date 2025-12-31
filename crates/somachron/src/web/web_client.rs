@@ -78,10 +78,8 @@ impl gpui::http_client::HttpClient for WebClient {
     fn send(
         &self,
         req: gpui::http_client::http::Request<gpui::http_client::AsyncBody>,
-    ) -> futures::future::BoxFuture<
-        'static,
-        anyhow::Result<gpui::http_client::Response<gpui::http_client::AsyncBody>>,
-    > {
+    ) -> futures::future::BoxFuture<'static, anyhow::Result<gpui::http_client::Response<gpui::http_client::AsyncBody>>>
+    {
         let (parts, body) = req.into_parts();
 
         let request = self
@@ -91,9 +89,7 @@ impl gpui::http_client::HttpClient for WebClient {
             .body(match body.0 {
                 gpui::http_client::Inner::Empty => reqwest::Body::default(),
                 gpui::http_client::Inner::Bytes(cursor) => cursor.into_inner().into(),
-                gpui::http_client::Inner::AsyncReader(pin) => {
-                    reqwest::Body::wrap_stream(FuturesStreamReader::new(pin))
-                }
+                gpui::http_client::Inner::AsyncReader(pin) => reqwest::Body::wrap_stream(FuturesStreamReader::new(pin)),
             });
 
         // TODO: redirect policies are supposed to be applied on client instead of request
@@ -155,10 +151,7 @@ impl FuturesStreamReader {
 impl futures::Stream for FuturesStreamReader {
     type Item = std::io::Result<bytes::Bytes>;
 
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
         let mut this = self.as_mut();
 
         let Some(mut reader) = this.reader.take() else {

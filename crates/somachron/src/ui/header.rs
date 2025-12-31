@@ -4,8 +4,7 @@ use gpui::{prelude::FluentBuilder, *};
 use gpui_component::collapsible::Collapsible;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{
-    ActiveTheme as _, Disableable, Icon, IconName, Sizable, StyledExt, ThemeMode, TitleBar,
-    WindowExt,
+    ActiveTheme as _, Disableable, Icon, IconName, Sizable, StyledExt, ThemeMode, TitleBar, WindowExt,
     avatar::Avatar,
     button::{Button, ButtonVariants},
     h_flex,
@@ -66,23 +65,22 @@ impl HeaderUi {
     ) -> Self {
         let job_view_collapsible = cx.new(|_cx| JobViewCollapsible { opened: Vec::new() });
 
-        let transfer_sub =
-            cx.subscribe_in(&transfer_manager, window, |this, _, _ev, window, cx| {
-                let opened = this
-                    .transfer_manager
-                    .read(cx)
-                    .jobs()
-                    .iter()
-                    .map(|_| false)
-                    .collect::<Vec<_>>();
+        let transfer_sub = cx.subscribe_in(&transfer_manager, window, |this, _, _ev, window, cx| {
+            let opened = this
+                .transfer_manager
+                .read(cx)
+                .jobs()
+                .iter()
+                .map(|_| false)
+                .collect::<Vec<_>>();
 
-                this.job_view_collapsible.update(cx, |jb, cx| {
-                    jb.opened = opened;
-                    cx.notify();
-                });
-
-                this.process_jobs(window, cx);
+            this.job_view_collapsible.update(cx, |jb, cx| {
+                jb.opened = opened;
+                cx.notify();
             });
+
+            this.process_jobs(window, cx);
+        });
 
         let auth_sub = cx.subscribe_in(&auth, window, |this, _, event, window, cx| {
             if let crate::auth::AuthEvent::Session(session_state) = event {
@@ -179,10 +177,9 @@ impl HeaderUi {
                 this.loading_user = false;
                 match result {
                     Ok(user) => this.user_data.update(cx, |ctx, _cx| ctx.user = Some(user)),
-                    Err(err) => window.push_notification(
-                        Notification::error(err.message).title("Failed to fetch user"),
-                        cx,
-                    ),
+                    Err(err) => {
+                        window.push_notification(Notification::error(err.message).title("Failed to fetch user"), cx)
+                    }
                 };
                 cx.notify();
             });
@@ -190,12 +187,7 @@ impl HeaderUi {
         .detach();
     }
 
-    fn fetch_spaces(
-        &self,
-        set_active_space: Option<Uuid>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn fetch_spaces(&self, set_active_space: Option<Uuid>, window: &mut Window, cx: &mut Context<Self>) {
         let inner = self.auth.read(cx).inner();
 
         let user_spaces = rt::spawn(cx, async move {
@@ -220,12 +212,9 @@ impl HeaderUi {
                     Ok(user_spaces) => {
                         window.close_all_dialogs(cx);
 
-                        if let Some(user_space) = set_active_space.and_then(|space_id| {
-                            user_spaces
-                                .iter()
-                                .find(|us| us.space.id == space_id)
-                                .cloned()
-                        }) {
+                        if let Some(user_space) = set_active_space
+                            .and_then(|space_id| user_spaces.iter().find(|us| us.space.id == space_id).cloned())
+                        {
                             this.nav.update(cx, |stack, cx| {
                                 stack.push(
                                     BrowseUi::view(
@@ -276,10 +265,9 @@ impl HeaderUi {
                             cx.emit(AuthEvent::Session(crate::auth::SessionState::LoggedOut));
                         });
                     }
-                    Err(err) => window.push_notification(
-                        Notification::error(err.message).title("Failed to log out"),
-                        cx,
-                    ),
+                    Err(err) => {
+                        window.push_notification(Notification::error(err.message).title("Failed to log out"), cx)
+                    }
                 };
                 cx.notify();
             });
@@ -299,9 +287,7 @@ impl HeaderUi {
 
         cx.spawn_in(window, async move |this, cx| {
             loop {
-                let jobs_result = this.read_with(cx, |this, cx| {
-                    this.transfer_manager.read(cx).next(cx).cloned()
-                });
+                let jobs_result = this.read_with(cx, |this, cx| this.transfer_manager.read(cx).next(cx).cloned());
 
                 let Ok(inner) = this.read_with(cx, |this, cx| this.auth.read(cx).inner()) else {
                     break;
@@ -326,17 +312,11 @@ impl HeaderUi {
                                 let folder_id = job.read(cx).folder.id;
 
                                 this.nav.update(cx, |_nav, cx| {
-                                    cx.emit(NavEvent::RefreshView(NavState::new(
-                                        space_id, folder_id,
-                                    )));
+                                    cx.emit(NavEvent::RefreshView(NavState::new(space_id, folder_id)));
                                 });
 
                                 job.clone().update(cx, |job, cx| {
-                                    if job
-                                        .uploads
-                                        .iter()
-                                        .all(|u| matches!(u.url_state, UrlState::Done))
-                                    {
+                                    if job.uploads.iter().all(|u| matches!(u.url_state, UrlState::Done)) {
                                         job.status = JobStatus::Done;
                                     }
                                     cx.notify();
@@ -345,8 +325,7 @@ impl HeaderUi {
                         }
                         Some(TransferJob::Download(job)) => {
                             let _ = this.update_in(cx, |_this, window, cx| {
-                                window
-                                    .push_notification(Notification::info("Download started"), cx);
+                                window.push_notification(Notification::info("Download started"), cx);
                                 job.clone().update(cx, |job, cx| {
                                     job.status = JobStatus::InProgress;
                                     cx.notify();
@@ -358,11 +337,7 @@ impl HeaderUi {
 
                             let _ = this.update(cx, |_this, cx| {
                                 job.clone().update(cx, |job, cx| {
-                                    if job
-                                        .downloads
-                                        .iter()
-                                        .all(|u| matches!(u.url_state, UrlState::Done))
-                                    {
+                                    if job.downloads.iter().all(|u| matches!(u.url_state, UrlState::Done)) {
                                         job.status = JobStatus::Done;
                                     }
                                     cx.notify();
@@ -409,12 +384,7 @@ impl create_space_dialog::CreateSpaceDialog for HeaderUi {
                 .get_token()
                 .await
                 .map_async(async move |token| {
-                    api::space::create_space(
-                        token,
-                        name.as_str().to_owned(),
-                        description.as_str().to_owned(),
-                    )
-                    .await
+                    api::space::create_space(token, name.as_str().to_owned(), description.as_str().to_owned()).await
                 })
                 .await
         });
@@ -435,10 +405,7 @@ impl create_space_dialog::CreateSpaceDialog for HeaderUi {
                     Err(err) => {
                         this.creating_space = false;
 
-                        window.push_notification(
-                            Notification::error(err.message).title("Failed to create space"),
-                            cx,
-                        );
+                        window.push_notification(Notification::error(err.message).title("Failed to create space"), cx);
                     }
                 };
                 cx.notify();
@@ -465,9 +432,7 @@ impl Render for HeaderUi {
             .top_0()
             .w_full()
             .child(self.render_nav_buttons(cx))
-            .when(self.logged_in, |this| {
-                this.child(self.render_space_switcher(cx))
-            })
+            .when(self.logged_in, |this| this.child(self.render_space_switcher(cx)))
             .child(
                 div()
                     .on_action(cx.listener(|this, _: &ClearJobs, _window, cx| {
@@ -545,32 +510,29 @@ impl HeaderUi {
                                 )
                         })
                         .separator()
-                        .menu_element(
-                            Box::new(EmptyAction),
-                            move |_window, cx| {
-                                let entity = entity.clone();
+                        .menu_element(Box::new(EmptyAction), move |_window, cx| {
+                            let entity = entity.clone();
 
-                                Button::new("logout")
-                                    .w_full()
-                                    .small()
-                                    .icon(Icon::empty().path("icons/log-out.svg"))
-                                    .label("Logout")
-                                    .ghost()
-                                    .disabled(
-                                        entity
-                                            .clone()
-                                            .read_with(cx, |this, _cx| this.jobs_running)
-                                            .unwrap_or_default(),
-                                    )
-                                    .on_click(move |_ev, window, cx| {
-                                        cx.stop_propagation();
+                            Button::new("logout")
+                                .w_full()
+                                .small()
+                                .icon(Icon::empty().path("icons/log-out.svg"))
+                                .label("Logout")
+                                .ghost()
+                                .disabled(
+                                    entity
+                                        .clone()
+                                        .read_with(cx, |this, _cx| this.jobs_running)
+                                        .unwrap_or_default(),
+                                )
+                                .on_click(move |_ev, window, cx| {
+                                    cx.stop_propagation();
 
-                                        let _ = entity.update(cx, |this, cx| {
-                                            this.logout(window, cx);
-                                        });
-                                    })
-                            },
-                        )
+                                    let _ = entity.update(cx, |this, cx| {
+                                        this.logout(window, cx);
+                                    });
+                                })
+                        })
                     })
                 }
                 None => this.dropdown_menu(|m, _, _| m),
@@ -605,20 +567,9 @@ impl HeaderUi {
                                 .overflow_hidden()
                                 .truncate()
                                 .text_ellipsis()
-                                .child(
-                                    div()
-                                        .whitespace_normal()
-                                        .child(us.space.name.clone())
-                                        .text_sm(),
-                                ),
+                                .child(div().whitespace_normal().child(us.space.name.clone()).text_sm()),
                         ),
-                        None => this.child(
-                            v_flex()
-                                .items_center()
-                                .justify_center()
-                                .w_40()
-                                .child("Select space"),
-                        ),
+                        None => this.child(v_flex().items_center().justify_center().w_40().child("Select space")),
                     })
                     .text_sm()
                     .disabled(self.loading_spaces)
@@ -631,48 +582,39 @@ impl HeaderUi {
                         window.open_dialog(cx, move |dialog, _window, cx| {
                             let entity = entity.clone();
                             let user_spaces = entity
-                                .read_with(cx, |this, cx| {
-                                    this.user_data.read(cx).user_spaces.clone()
-                                })
+                                .read_with(cx, |this, cx| this.user_data.read(cx).user_spaces.clone())
                                 .unwrap_or_default();
 
-                            select_space_dialog::comp(
-                                dialog,
-                                entity,
-                                user_spaces,
-                                cx,
-                                |entity, state, window, cx| {
-                                    entity
-                                        .clone()
-                                        .update(cx, |this, cx| {
-                                            this.nav.update(cx, |stack, cx| {
-                                                if let Some(current_space_id) =
-                                                    stack.current_space_id()
-                                                    && current_space_id == state.space_id()
-                                                {
-                                                    // skip
-                                                    return;
-                                                }
+                            select_space_dialog::comp(dialog, entity, user_spaces, cx, |entity, state, window, cx| {
+                                entity
+                                    .clone()
+                                    .update(cx, |this, cx| {
+                                        this.nav.update(cx, |stack, cx| {
+                                            if let Some(current_space_id) = stack.current_space_id()
+                                                && current_space_id == state.space_id()
+                                            {
+                                                // skip
+                                                return;
+                                            }
 
-                                                stack.push(
-                                                    BrowseUi::view(
-                                                        this.auth.clone(),
-                                                        this.user_data.clone(),
-                                                        this.nav.clone(),
-                                                        this.transfer_manager.clone(),
-                                                        state,
-                                                        window,
-                                                        cx,
-                                                    ),
+                                            stack.push(
+                                                BrowseUi::view(
+                                                    this.auth.clone(),
+                                                    this.user_data.clone(),
+                                                    this.nav.clone(),
+                                                    this.transfer_manager.clone(),
+                                                    state,
+                                                    window,
                                                     cx,
-                                                );
-                                            });
-                                        })
-                                        .ok();
+                                                ),
+                                                cx,
+                                            );
+                                        });
+                                    })
+                                    .ok();
 
-                                    window.close_dialog(cx);
-                                },
-                            )
+                                window.close_dialog(cx);
+                            })
                         });
                     }),
             )
@@ -690,12 +632,7 @@ impl HeaderUi {
                                 sheet.child(
                                     v_flex()
                                         .gap_3()
-                                        .child(
-                                            div()
-                                                .text_lg()
-                                                .font_medium()
-                                                .child(us.space.name.clone()),
-                                        )
+                                        .child(div().text_lg().font_medium().child(us.space.name.clone()))
                                         .child(div().child("Members")),
                                 )
                             });
@@ -741,14 +678,7 @@ impl HeaderUi {
                             Collapsible::new()
                                 .min_w_112()
                                 .gap_2()
-                                .open(
-                                    collapsible
-                                        .read(cx)
-                                        .opened
-                                        .get(i)
-                                        .cloned()
-                                        .unwrap_or_default(),
-                                )
+                                .open(collapsible.read(cx).opened.get(i).cloned().unwrap_or_default())
                                 .child(
                                     div()
                                         .flex()
@@ -794,44 +724,29 @@ impl HeaderUi {
                                                 }),
                                         ),
                                 )
-                                .content(
-                                    div().flex().flex_col().max_h_112().min_w_112().gap_2().map(
-                                        |this| match job.clone() {
-                                            TransferJob::Upload(job) => this
-                                                .child(Self::render_upload_job_menu_view(
-                                                    i,
-                                                    job.clone(),
-                                                    cx,
-                                                ))
-                                                .child(div().child(format!(
-                                                    "Total items: {}",
-                                                    job.read(cx).uploads.len()
-                                                ))),
-                                            TransferJob::Download(job) => this
-                                                .child(Self::render_download_job_menu_view(
-                                                    i,
-                                                    job.clone(),
-                                                    cx,
-                                                ))
-                                                .child(div().child(format!(
-                                                    "Total items: {}",
-                                                    job.read(cx).downloads.len()
-                                                ))),
-                                        },
-                                    ),
-                                )
+                                .content(div().flex().flex_col().max_h_112().min_w_112().gap_2().map(|this| {
+                                    match job.clone() {
+                                        TransferJob::Upload(job) => this
+                                            .child(Self::render_upload_job_menu_view(i, job.clone(), cx))
+                                            .child(div().child(format!("Total items: {}", job.read(cx).uploads.len()))),
+                                        TransferJob::Download(job) => this
+                                            .child(Self::render_download_job_menu_view(i, job.clone(), cx))
+                                            .child(
+                                                div().child(format!("Total items: {}", job.read(cx).downloads.len())),
+                                            ),
+                                    }
+                                }))
                         })
                         .separator();
                 }
-                menu.separator()
-                    .menu_element(Box::new(ClearJobs), move |_window, _cx| {
-                        div()
-                            .flex()
-                            .gap_2()
-                            .items_center()
-                            .child(Icon::new(IconName::Close))
-                            .child("Clear all")
-                    })
+                menu.separator().menu_element(Box::new(ClearJobs), move |_window, _cx| {
+                    div()
+                        .flex()
+                        .gap_2()
+                        .items_center()
+                        .child(Icon::new(IconName::Close))
+                        .child("Clear all")
+                })
             })
     }
 
@@ -875,34 +790,22 @@ impl HeaderUi {
                     )
                     .map(|this| match &state.url_state {
                         UrlState::Queued => this.child(loading_icon(|icon| icon.size_4())),
-                        UrlState::Transferring(_) => {
-                            this.child(Icon::empty().path("icons/upload.svg"))
-                        }
-                        UrlState::Done => {
-                            this.child(Icon::empty().path("icons/check.svg").text_color(green()))
-                        }
+                        UrlState::Transferring(_) => this.child(Icon::empty().path("icons/upload.svg")),
+                        UrlState::Done => this.child(Icon::empty().path("icons/check.svg").text_color(green())),
                         UrlState::Error(err) => {
                             let message = err.message.clone();
                             this.child(
                                 div()
                                     .id(SharedString::from(format!("err-{i}")))
-                                    .child(
-                                        Icon::new(IconName::CircleX).text_color(cx.theme().danger),
-                                    )
-                                    .tooltip(move |window, cx| {
-                                        Tooltip::new(message.clone()).build(window, cx)
-                                    }),
+                                    .child(Icon::new(IconName::CircleX).text_color(cx.theme().danger))
+                                    .tooltip(move |window, cx| Tooltip::new(message.clone()).build(window, cx)),
                             )
                         }
                     })
             }))
     }
 
-    fn render_download_job_menu_view(
-        i: usize,
-        job: Entity<DownloadJob>,
-        cx: &App,
-    ) -> impl IntoElement {
+    fn render_download_job_menu_view(i: usize, job: Entity<DownloadJob>, cx: &App) -> impl IntoElement {
         div()
             .id(SharedString::new(i.to_string()))
             .h_full()
@@ -942,23 +845,15 @@ impl HeaderUi {
                     )
                     .map(|this| match &state.url_state {
                         UrlState::Queued => this.child(loading_icon(|icon| icon.size_4())),
-                        UrlState::Transferring(_) => {
-                            this.child(Icon::empty().path("icons/download.svg"))
-                        }
-                        UrlState::Done => {
-                            this.child(Icon::empty().path("icons/check.svg").text_color(green()))
-                        }
+                        UrlState::Transferring(_) => this.child(Icon::empty().path("icons/download.svg")),
+                        UrlState::Done => this.child(Icon::empty().path("icons/check.svg").text_color(green())),
                         UrlState::Error(err) => {
                             let message = err.message.clone();
                             this.child(
                                 div()
                                     .id(SharedString::from(format!("err-{i}")))
-                                    .child(
-                                        Icon::new(IconName::CircleX).text_color(cx.theme().danger),
-                                    )
-                                    .tooltip(move |window, cx| {
-                                        Tooltip::new(message.clone()).build(window, cx)
-                                    }),
+                                    .child(Icon::new(IconName::CircleX).text_color(cx.theme().danger))
+                                    .tooltip(move |window, cx| Tooltip::new(message.clone()).build(window, cx)),
                             )
                         }
                     })

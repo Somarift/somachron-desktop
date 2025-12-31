@@ -1,7 +1,7 @@
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, Icon, IconName, Sizable, StyledExt, WindowExt, h_flex, label::Label,
-    notification::Notification, tooltip::Tooltip, v_flex,
+    ActiveTheme, Icon, IconName, Sizable, StyledExt, WindowExt, h_flex, label::Label, notification::Notification,
+    tooltip::Tooltip, v_flex,
 };
 
 use crate::{
@@ -83,12 +83,7 @@ impl create_space_dialog::CreateSpaceDialog for HomeUi {
                 .get_token()
                 .await
                 .map_async(async move |token| {
-                    api::space::create_space(
-                        token,
-                        name.as_str().to_owned(),
-                        description.as_str().to_owned(),
-                    )
-                    .await
+                    api::space::create_space(token, name.as_str().to_owned(), description.as_str().to_owned()).await
                 })
                 .await
         });
@@ -111,10 +106,7 @@ impl create_space_dialog::CreateSpaceDialog for HomeUi {
                     Err(err) => {
                         this.creating_space = false;
 
-                        window.push_notification(
-                            Notification::error(err.message).title("Failed to create space"),
-                            cx,
-                        );
+                        window.push_notification(Notification::error(err.message).title("Failed to create space"), cx);
                     }
                 };
                 cx.notify();
@@ -201,11 +193,7 @@ impl HomeUi {
                                 .child(Icon::new(IconName::GalleryVerticalEnd).size_5()),
                         )
                         .child(div().text_lg().child("Cloud storage empty"))
-                        .child(
-                            div().child(
-                                "Create your space and upload files to access them anywhere.",
-                            ),
-                        )
+                        .child(div().child("Create your space and upload files to access them anywhere."))
                         .child(create_space_dialog::trigger(cx.weak_entity())),
                 )
             } else {
@@ -246,8 +234,7 @@ impl HomeUi {
                                 let space_description = space_description.clone();
                                 Tooltip::element(move |_, cx| {
                                     div().child(Label::new(space_name.clone())).child(
-                                        Label::new(space_description.clone())
-                                            .text_color(cx.theme().muted_foreground),
+                                        Label::new(space_description.clone()).text_color(cx.theme().muted_foreground),
                                     )
                                 })
                                 .build(window, cx)

@@ -128,10 +128,7 @@ impl Render for MediaUi {
                                 .and_then(|f| md.asset(&f.id).cloned().map(|asset| (f, asset)))
                         }),
                         |this, (file, asset_state)| {
-                            if let MediaAssetState::Loaded {
-                                preview_asset_ty, ..
-                            } = asset_state.clone()
-                            {
+                            if let MediaAssetState::Loaded { preview_asset_ty, .. } = asset_state.clone() {
                                 match preview_asset_ty {
                                     PreviewAssetType::Loading => this
                                         .child(
@@ -145,22 +142,17 @@ impl Render for MediaUi {
                                         .size_full(),
                                     PreviewAssetType::Preview(path_buf) => {
                                         this.child(
-                                            img(ImageSource::Resource(Resource::Path(
-                                                path_buf.into(),
-                                            )))
-                                            .id(SharedString::new(format!("{}", file.id)))
-                                            .size_full()
-                                            .rounded_md()
-                                            .overflow_hidden()
-                                            // .image_cache(&self.image_cache)
-                                            .object_fit(ObjectFit::Contain)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .with_loading(|| {
-                                                loading_icon(|icon| icon.size_8())
-                                                    .into_any_element()
-                                            }),
+                                            img(ImageSource::Resource(Resource::Path(path_buf.into())))
+                                                .id(SharedString::new(format!("{}", file.id)))
+                                                .size_full()
+                                                .rounded_md()
+                                                .overflow_hidden()
+                                                // .image_cache(&self.image_cache)
+                                                .object_fit(ObjectFit::Contain)
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .with_loading(|| loading_icon(|icon| icon.size_8()).into_any_element()),
                                         )
                                     }
                                     PreviewAssetType::VideoUrl(url) => {

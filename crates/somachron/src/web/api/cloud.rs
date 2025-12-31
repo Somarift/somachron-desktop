@@ -13,34 +13,19 @@ use super::{
     models::cloud::res::{FileMetaReponse, FolderResponse},
 };
 
-pub async fn list_folders(
-    token: &str,
-    space_id: &Uuid,
-    folder_id: &Uuid,
-) -> Result<Vec<FolderResponse>, AppError> {
+pub async fn list_folders(token: &str, space_id: &Uuid, folder_id: &Uuid) -> Result<Vec<FolderResponse>, AppError> {
     super::get(format!("/media/lf/{folder_id}"), token, Some(space_id)).await
 }
 
-pub async fn list_files(
-    token: &str,
-    space_id: &Uuid,
-    folder_id: &Uuid,
-) -> Result<Vec<FileMetaReponse>, AppError> {
+pub async fn list_files(token: &str, space_id: &Uuid, folder_id: &Uuid) -> Result<Vec<FileMetaReponse>, AppError> {
     super::get(format!("/media/ls/{folder_id}"), token, Some(space_id)).await
 }
 
-pub async fn list_gallery_files(
-    token: &str,
-    space_id: &Uuid,
-) -> Result<Vec<FileMetaReponse>, AppError> {
+pub async fn list_gallery_files(token: &str, space_id: &Uuid) -> Result<Vec<FileMetaReponse>, AppError> {
     super::get("/media/lg", token, Some(space_id)).await
 }
 
-pub async fn get_folder(
-    token: &str,
-    space_id: &Uuid,
-    folder_id: &Uuid,
-) -> Result<FolderResponse, AppError> {
+pub async fn get_folder(token: &str, space_id: &Uuid, folder_id: &Uuid) -> Result<FolderResponse, AppError> {
     super::get(format!("/media/d/{folder_id}"), token, Some(space_id)).await
 }
 
@@ -86,19 +71,11 @@ pub async fn create_folder(
     .await
 }
 
-pub async fn delete_folder(
-    token: &str,
-    space_id: &Uuid,
-    folder_id: &Uuid,
-) -> Result<EmptyResponse, AppError> {
+pub async fn delete_folder(token: &str, space_id: &Uuid, folder_id: &Uuid) -> Result<EmptyResponse, AppError> {
     super::delete(format!("/media/rm/{folder_id}"), token, Some(space_id)).await
 }
 
-pub async fn delete_file(
-    token: &str,
-    space_id: &Uuid,
-    file_id: &Uuid,
-) -> Result<EmptyResponse, AppError> {
+pub async fn delete_file(token: &str, space_id: &Uuid, file_id: &Uuid) -> Result<EmptyResponse, AppError> {
     super::delete(format!("/media/rmf/{file_id}"), token, Some(space_id)).await
 }
 

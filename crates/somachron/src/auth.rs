@@ -164,9 +164,7 @@ impl InnerAuth {
         // get environment
         let res = self
             .client
-            .get(format!(
-                "{CLERK_API_URL}/v1/environment{CLERK_QUERY_VERSION}"
-            ))
+            .get(format!("{CLERK_API_URL}/v1/environment{CLERK_QUERY_VERSION}"))
             .send()
             .await
             .expect("Failed to send env request");
@@ -203,8 +201,7 @@ impl InnerAuth {
             *wl = Some(data.response.id);
         }
 
-        self.update_cookies(cookies, data.response.cookie_expires_at)
-            .await;
+        self.update_cookies(cookies, data.response.cookie_expires_at).await;
 
         Ok(())
     }
@@ -212,9 +209,7 @@ impl InnerAuth {
     pub async fn sign_in(&self, email: &str) -> Result<String, AppError> {
         let res = self
             .client
-            .post(format!(
-                "{CLERK_API_URL}/v1/client/sign_ins{CLERK_QUERY_VERSION}"
-            ))
+            .post(format!("{CLERK_API_URL}/v1/client/sign_ins{CLERK_QUERY_VERSION}"))
             .header(COOKIE_HEADER, self.get_header_cookies().await)
             .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
             .form(&[("identifier", email)])
@@ -240,8 +235,7 @@ impl InnerAuth {
                 let mut guard = self.sign_in_id.write().await;
                 *guard = Some(data.response.id);
             }
-            self.update_cookies(cookies, data.client.cookie_expires_at)
-                .await;
+            self.update_cookies(cookies, data.client.cookie_expires_at).await;
 
             Ok(idn.email_address_id)
         } else {
@@ -266,10 +260,7 @@ impl InnerAuth {
             ))
             .header(COOKIE_HEADER, self.get_header_cookies().await)
             .header(CONTENT_TYPE_HEADER, FORM_DATA_TYPE)
-            .form(&[
-                ("email_address_id", email_address_id),
-                ("strategy", CLERK_STRATEGY),
-            ])
+            .form(&[("email_address_id", email_address_id), ("strategy", CLERK_STRATEGY)])
             .send()
             .await
             .map_err(AppError::err)?;
@@ -278,8 +269,7 @@ impl InnerAuth {
 
         if res.status().is_success() {
             let data: SignInPayload = res.json().await.map_err(AppError::err)?;
-            self.update_cookies(cookies, data.client.cookie_expires_at)
-                .await;
+            self.update_cookies(cookies, data.client.cookie_expires_at).await;
             Ok(())
         } else {
             let err = Self::get_error(res).await?;
@@ -323,8 +313,7 @@ impl InnerAuth {
                 *wl = Some(session_id);
             }
 
-            self.update_cookies(cookies, data.client.cookie_expires_at)
-                .await;
+            self.update_cookies(cookies, data.client.cookie_expires_at).await;
             Ok(())
         } else {
             let err = Self::get_error(res).await?;
@@ -399,10 +388,7 @@ impl InnerAuth {
         let res_cookies = extract_cookies(res.headers());
         if res.status().is_client_error() {
             let text = res.text().await.map_err(AppError::err)?;
-            return Err(AppError::message(format!(
-                "Error deleting session: {}",
-                text
-            )));
+            return Err(AppError::message(format!("Error deleting session: {}", text)));
         }
 
         let _: ClientPayload = res.json().await.unwrap();
@@ -426,14 +412,11 @@ impl InnerAuth {
         let data: ClerkErrorPayload = res.json().await.map_err(AppError::err)?;
         Ok(AppError {
             status: status.as_u16(),
-            message: data
-                .errors
-                .into_iter()
-                .fold(String::from(""), |mut acc, err| {
-                    acc.push_str(&err.long_message);
-                    acc.push_str("; ");
-                    acc
-                }),
+            message: data.errors.into_iter().fold(String::from(""), |mut acc, err| {
+                acc.push_str(&err.long_message);
+                acc.push_str("; ");
+                acc
+            }),
             req_id: "".into(),
         })
     }
@@ -484,10 +467,7 @@ fn filter_store_cookies(cookies: HashMap<String, Cookie>) -> HashMap<String, Coo
         .unwrap()
         .as_millis() as u64;
 
-    cookies
-        .into_iter()
-        .filter(|(_, cookie)| cookie.expires > now)
-        .collect()
+    cookies.into_iter().filter(|(_, cookie)| cookie.expires > now).collect()
 }
 
 fn extract_cookies(headers: &reqwest::header::HeaderMap) -> HashMap<String, Cookie> {

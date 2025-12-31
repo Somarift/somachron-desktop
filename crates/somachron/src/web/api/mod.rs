@@ -27,27 +27,16 @@ pub struct EmptyResponse {
 }
 
 pub async fn download(url: String, dst: PathBuf) -> Result<PathBuf, AppError> {
-    let res = API_CLIENT
-        .get(url)
-        .send()
-        .await
-        .map_err(|err| AppError::err(err))?;
+    let res = API_CLIENT.get(url).send().await.map_err(|err| AppError::err(err))?;
 
     let status = res.status();
 
     if status.is_success() {
         let bytes = res.bytes().await.map_err(|err| AppError::err(err))?;
-        let mut file = tokio::fs::File::create(&dst)
-            .await
-            .map_err(|err| AppError::err(err))?;
-        file.write_all(bytes.as_ref())
-            .await
-            .map_err(|err| AppError::err(err))?;
+        let mut file = tokio::fs::File::create(&dst).await.map_err(|err| AppError::err(err))?;
+        file.write_all(bytes.as_ref()).await.map_err(|err| AppError::err(err))?;
 
-        tracing::info!(
-            msg = "Downloaded file",
-            path = format!("{}", dst.to_string_lossy())
-        );
+        tracing::info!(msg = "Downloaded file", path = format!("{}", dst.to_string_lossy()));
 
         return Ok(dst);
     }
@@ -61,9 +50,7 @@ pub async fn download(url: String, dst: PathBuf) -> Result<PathBuf, AppError> {
 }
 
 pub async fn upload(url: &str, from: PathBuf) -> Result<(u64, u64), AppError> {
-    let file = tokio::fs::File::open(&from)
-        .await
-        .map_err(|err| AppError::err(err))?;
+    let file = tokio::fs::File::open(&from).await.map_err(|err| AppError::err(err))?;
     let metadata = file.metadata().await.map_err(|err| AppError::err(err))?;
 
     let file_size = metadata.len();
@@ -88,10 +75,7 @@ pub async fn upload(url: &str, from: PathBuf) -> Result<(u64, u64), AppError> {
     let status = res.status();
 
     if status.is_success() {
-        tracing::info!(
-            msg = "Uploaded file",
-            path = format!("{}", from.to_string_lossy())
-        );
+        tracing::info!(msg = "Uploaded file", path = format!("{}", from.to_string_lossy()));
         return Ok((file_size, updated_millis));
     }
 
@@ -112,10 +96,7 @@ async fn get<R: DeserializeOwned + Send + 'static>(
         .get(format!("{API_URL}{}", api.into()))
         .bearer_auth(token)
         .header("Content-Type", "application/json")
-        .header(
-            SPACE_ID_HEADER,
-            space_id.map(|s| s.to_string()).unwrap_or_default(),
-        )
+        .header(SPACE_ID_HEADER, space_id.map(|s| s.to_string()).unwrap_or_default())
         .send()
         .await
         .map_err(AppError::err)?;
@@ -133,10 +114,7 @@ async fn post<R: DeserializeOwned + Send + 'static, B: Serialize + Send + 'stati
         .post(format!("{API_URL}{}", api.into()))
         .bearer_auth(token)
         .header("Content-Type", "application/json")
-        .header(
-            SPACE_ID_HEADER,
-            space_id.map(|s| s.to_string()).unwrap_or_default(),
-        )
+        .header(SPACE_ID_HEADER, space_id.map(|s| s.to_string()).unwrap_or_default())
         .json(&body)
         .send()
         .await
@@ -154,10 +132,7 @@ async fn delete<R: DeserializeOwned + Send + 'static>(
         .delete(format!("{API_URL}{}", api.into()))
         .bearer_auth(token)
         .header("Content-Type", "application/json")
-        .header(
-            SPACE_ID_HEADER,
-            space_id.map(|s| s.to_string()).unwrap_or_default(),
-        )
+        .header(SPACE_ID_HEADER, space_id.map(|s| s.to_string()).unwrap_or_default())
         .send()
         .await
         .map_err(AppError::err)?;

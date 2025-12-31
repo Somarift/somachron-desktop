@@ -36,12 +36,7 @@ impl AppError {
         let location = std::panic::Location::caller();
         tracing::error!(
             msg = "Error",
-            location = format!(
-                "{}:{}:{}",
-                location.file(),
-                location.line(),
-                location.column()
-            ),
+            location = format!("{}:{}:{}", location.file(), location.line(), location.column()),
             error = message,
         );
 
@@ -58,12 +53,7 @@ impl AppError {
         let location = std::panic::Location::caller();
         tracing::error!(
             msg = format!("Error: {err}"),
-            location = format!(
-                "{}:{}:{}",
-                location.file(),
-                location.line(),
-                location.column()
-            ),
+            location = format!("{}:{}:{}", location.file(), location.line(), location.column()),
             error = source,
         );
 

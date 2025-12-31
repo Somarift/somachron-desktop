@@ -213,22 +213,17 @@ impl Render for LoginUi {
                                         ),
                                 )
                                 .when(self.otp_verification, |d| {
-                                    d.child(
-                                        OtpInput::new(&self.otp_input)
-                                            .groups(2)
-                                            .disabled(self.loading)
-                                            .large(),
-                                    )
-                                    .child(
-                                        Button::new("login-cancel")
-                                            .disabled(self.loading)
-                                            .danger()
-                                            .cursor_pointer()
-                                            .label("Cancel")
-                                            .on_click(cx.listener(|this, _, window, cx| {
-                                                this.reset_otp_verification(Some(window), cx);
-                                            })),
-                                    )
+                                    d.child(OtpInput::new(&self.otp_input).groups(2).disabled(self.loading).large())
+                                        .child(
+                                            Button::new("login-cancel")
+                                                .disabled(self.loading)
+                                                .danger()
+                                                .cursor_pointer()
+                                                .label("Cancel")
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.reset_otp_verification(Some(window), cx);
+                                                })),
+                                        )
                                 })
                                 .when(!self.otp_verification, |d| {
                                     d.child(
@@ -251,9 +246,7 @@ impl Render for LoginUi {
                                         .when_else(
                                             self.loading || self.otp_verification,
                                             |d| d.text_color(cx.theme().muted_foreground),
-                                            |d| {
-                                                d.cursor_pointer().hover(|s| s.bg(cx.theme().muted))
-                                            },
+                                            |d| d.cursor_pointer().hover(|s| s.bg(cx.theme().muted)),
                                         )
                                         .child("Don't have an account? Sign up")
                                         .on_click(cx.listener(|this, _, _, cx| {

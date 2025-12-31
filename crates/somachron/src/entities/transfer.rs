@@ -49,11 +49,7 @@ pub struct UploadJob {
 }
 
 impl UploadJob {
-    pub async fn initialize_uploads(
-        inner: Arc<InnerAuth>,
-        job: Entity<Self>,
-        cx: &mut AsyncWindowContext,
-    ) {
+    pub async fn initialize_uploads(inner: Arc<InnerAuth>, job: Entity<Self>, cx: &mut AsyncWindowContext) {
         let tasks = job
             .read_with(cx, |this, cx| {
                 let job = job.clone();
@@ -79,10 +75,7 @@ impl UploadJob {
                                 .get_token()
                                 .await
                                 .map_async(async move |token| {
-                                    api::cloud::init_file_upload(
-                                        &token, &space_id, &folder_id, &file_name,
-                                    )
-                                    .await
+                                    api::cloud::init_file_upload(&token, &space_id, &folder_id, &file_name).await
                                 })
                                 .await
                         });
@@ -107,11 +100,7 @@ impl UploadJob {
         run_batched(cx, tasks).await
     }
 
-    pub async fn upload_files(
-        inner: Arc<InnerAuth>,
-        job: Entity<Self>,
-        cx: &mut AsyncWindowContext,
-    ) {
+    pub async fn upload_files(inner: Arc<InnerAuth>, job: Entity<Self>, cx: &mut AsyncWindowContext) {
         let tasks = job
             .read_with(cx, |this, cx| {
                 let folder_id = this.folder.id;
@@ -133,25 +122,20 @@ impl UploadJob {
                                     api::upload(url.as_str(), path)
                                         .await
                                         .map_async(async move |data| {
-                                            inner
-                                                .get_token()
-                                                .await
-                                                .map(|token| (token, data.0, data.1))
+                                            inner.get_token().await.map(|token| (token, data.0, data.1))
                                         })
                                         .await
-                                        .map_async(
-                                            async move |(token, file_size, updated_millis)| {
-                                                api::cloud::complete_file_upload(
-                                                    &token,
-                                                    &space_id,
-                                                    &folder_id,
-                                                    file_name.as_str(),
-                                                    file_size,
-                                                    updated_millis,
-                                                )
-                                                .await
-                                            },
-                                        )
+                                        .map_async(async move |(token, file_size, updated_millis)| {
+                                            api::cloud::complete_file_upload(
+                                                &token,
+                                                &space_id,
+                                                &folder_id,
+                                                file_name.as_str(),
+                                                file_size,
+                                                updated_millis,
+                                            )
+                                            .await
+                                        })
                                         .await
                                 });
 
@@ -186,11 +170,7 @@ pub struct DownloadJob {
     pub status: JobStatus,
 }
 impl DownloadJob {
-    pub async fn initialize_downloads(
-        inner: Arc<InnerAuth>,
-        job: Entity<Self>,
-        cx: &mut AsyncWindowContext,
-    ) {
+    pub async fn initialize_downloads(inner: Arc<InnerAuth>, job: Entity<Self>, cx: &mut AsyncWindowContext) {
         let tasks = job
             .read_with(cx, |this, cx| {
                 let job = job.clone();
@@ -209,8 +189,7 @@ impl DownloadJob {
                                 .get_token()
                                 .await
                                 .map_async(async move |token| {
-                                    api::cloud::get_download_stream_url(&token, &space_id, &file_id)
-                                        .await
+                                    api::cloud::get_download_stream_url(&token, &space_id, &file_id).await
                                 })
                                 .await
                         });
@@ -248,8 +227,7 @@ impl DownloadJob {
                             UrlState::Transferring(data) => {
                                 let url = data.url.clone();
                                 let path = state.path.clone();
-                                let task =
-                                    rt::spawn(cx, async move { api::download(url, path).await });
+                                let task = rt::spawn(cx, async move { api::download(url, path).await });
 
                                 Some(cx.spawn(async move |cx| {
                                     let result = task.await.flatten();
@@ -292,12 +270,7 @@ pub enum TransferJob {
 }
 
 impl TransferJob {
-    pub fn upload(
-        paths: Arc<Vec<PathBuf>>,
-        space_id: Uuid,
-        folder: FolderResponse,
-        cx: &mut App,
-    ) -> Self {
+    pub fn upload(paths: Arc<Vec<PathBuf>>, space_id: Uuid, folder: FolderResponse, cx: &mut App) -> Self {
         let uploads = paths
             .iter()
             .map(|path| UploadState {
@@ -397,9 +370,7 @@ impl TransferManager {
     }
 
     pub fn next(&self, cx: &App) -> Option<&TransferJob> {
-        self.jobs
-            .iter()
-            .find(|j| matches!(j.status(cx), JobStatus::Queued))
+        self.jobs.iter().find(|j| matches!(j.status(cx), JobStatus::Queued))
     }
 
     pub fn trim_completed(&mut self, cx: &App) {

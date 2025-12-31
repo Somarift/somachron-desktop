@@ -22,8 +22,8 @@ use crate::{
         UserData,
         bounds::RenderBounds,
         media::{
-            ElementType, FetchMedia, MEDIA_GAP, MEDIA_HEIGHT, MediaAssetState, MediaState,
-            PreviewAssetType, SECTION_HEIGHT,
+            ElementType, FetchMedia, MEDIA_GAP, MEDIA_HEIGHT, MediaAssetState, MediaState, PreviewAssetType,
+            SECTION_HEIGHT,
         },
         nav::{NavEvent, NavId, NavState, Navigation},
         transfer::{TransferJob, TransferManager},
@@ -83,14 +83,10 @@ impl BrowseUi {
         let media_state = cx.new(|_cx| MediaState::new());
         let render_bounds = cx.new(|_cx| RenderBounds::new());
 
-        let size_sub = cx.subscribe_in(
-            &render_bounds,
-            window,
-            |this, _entity, _event, _window, cx| {
-                Self::compute_visible_grid(this, cx);
-                Self::update_visible_state(this, cx);
-            },
-        );
+        let size_sub = cx.subscribe_in(&render_bounds, window, |this, _entity, _event, _window, cx| {
+            Self::compute_visible_grid(this, cx);
+            Self::update_visible_state(this, cx);
+        });
 
         let nav_sub = cx.subscribe_in(&nav, window, |this, _entity, event, window, cx| {
             let (refresh, fetch_files) = match event {
@@ -109,11 +105,10 @@ impl BrowseUi {
             }
         });
 
-        let media_sub =
-            cx.subscribe_in(&media_state, window, |this, _entity, event, window, cx| {
-                let FetchMedia { file } = event;
-                this.fetch_image_urls(window, cx, file.clone());
-            });
+        let media_sub = cx.subscribe_in(&media_state, window, |this, _entity, event, window, cx| {
+            let FetchMedia { file } = event;
+            this.fetch_image_urls(window, cx, file.clone());
+        });
 
         Self {
             auth,
@@ -196,10 +191,7 @@ impl BrowseUi {
         let bounds = this.render_bounds.read(cx);
         let end_offset = scroll_offset + bounds.height;
 
-        this.visible_item_range = this
-            .media_state
-            .read(cx)
-            .get_visible_state(scroll_offset, end_offset);
+        this.visible_item_range = this.media_state.read(cx).get_visible_state(scroll_offset, end_offset);
 
         cx.notify();
     }
@@ -225,9 +217,7 @@ impl BrowseUi {
             inner
                 .get_token()
                 .await
-                .map_async(async move |token| {
-                    api::cloud::get_folder(&token, state.space_id(), state.folder_id()).await
-                })
+                .map_async(async move |token| api::cloud::get_folder(&token, state.space_id(), state.folder_id()).await)
                 .await
         });
 
@@ -246,10 +236,9 @@ impl BrowseUi {
                     Ok(folders) => {
                         this.folders = folders;
                     }
-                    Err(err) => window.push_notification(
-                        Notification::error(err.message).title("Failed to fetch folders"),
-                        cx,
-                    ),
+                    Err(err) => {
+                        window.push_notification(Notification::error(err.message).title("Failed to fetch folders"), cx)
+                    }
                 };
 
                 match folder {
@@ -275,9 +264,7 @@ impl BrowseUi {
             inner
                 .get_token()
                 .await
-                .map_async(async move |token| {
-                    api::cloud::list_files(&token, state.space_id(), state.folder_id()).await
-                })
+                .map_async(async move |token| api::cloud::list_files(&token, state.space_id(), state.folder_id()).await)
                 .await
         });
 
@@ -300,10 +287,9 @@ impl BrowseUi {
 
                         Self::compute_visible_grid(this, cx);
                     }
-                    Err(err) => window.push_notification(
-                        Notification::error(err.message).title("Failed to get files"),
-                        cx,
-                    ),
+                    Err(err) => {
+                        window.push_notification(Notification::error(err.message).title("Failed to get files"), cx)
+                    }
                 };
 
                 Self::update_visible_state(this, cx);
@@ -313,20 +299,13 @@ impl BrowseUi {
         .detach();
     }
 
-    fn fetch_image_urls(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        file: Arc<FileMetaReponse>,
-    ) {
+    fn fetch_image_urls(&mut self, window: &mut Window, cx: &mut Context<Self>, file: Arc<FileMetaReponse>) {
         let nav_state = self.current_nav.clone();
 
         let file = self.media_state.update(cx, |ms, cx| {
             if let Some(state) = ms.asset_mut(&file.id) {
                 match state {
-                    MediaAssetState::Queued
-                    | MediaAssetState::Error
-                    | MediaAssetState::Loaded { .. } => {
+                    MediaAssetState::Queued | MediaAssetState::Error | MediaAssetState::Loaded { .. } => {
                         return None;
                     }
                     _ => (),
@@ -365,8 +344,7 @@ impl BrowseUi {
                 .get_token()
                 .await
                 .map_async(async move |token| {
-                    api::cloud::get_thumbnail_stream_url(&token, nav_state.space_id(), &file_id)
-                        .await
+                    api::cloud::get_thumbnail_stream_url(&token, nav_state.space_id(), &file_id).await
                 })
                 .await
                 .map_async(async move |urls| api::download(urls.url, th_path).await)
@@ -425,11 +403,7 @@ impl BrowseUi {
         let task = rt::spawn(cx, async move {
             let cache_dir = paths::cache_dir().map_err(|err| AppError::err(err))?;
 
-            let preview_file = cache_dir.join(format!(
-                "preview_{}_{}",
-                _file.id,
-                _file.updated_at.timestamp_millis()
-            ));
+            let preview_file = cache_dir.join(format!("preview_{}_{}", _file.id, _file.updated_at.timestamp_millis()));
 
             if _file.media_type == MediaType::Image && preview_file.exists() {
                 return Ok(PreviewAssetType::Preview(preview_file));
@@ -445,9 +419,7 @@ impl BrowseUi {
                 })
                 .await
                 .map_async(async move |urls| match _file.media_type {
-                    MediaType::Image => api::download(urls.url, pr_path)
-                        .await
-                        .map(PreviewAssetType::Preview),
+                    MediaType::Image => api::download(urls.url, pr_path).await.map(PreviewAssetType::Preview),
                     MediaType::Video => {
                         let url = Url::from_str(&urls.url).map_err(|err| AppError::err(err))?;
                         Ok(PreviewAssetType::VideoUrl(url))
@@ -490,13 +462,7 @@ impl BrowseUi {
     fn open_media(this: &mut Self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         this.nav.update(cx, |nav, cx| {
             nav.push(
-                MediaUi::view(
-                    this.current_nav.clone(),
-                    this.media_state.clone(),
-                    index,
-                    window,
-                    cx,
-                ),
+                MediaUi::view(this.current_nav.clone(), this.media_state.clone(), index, window, cx),
                 cx,
             );
             cx.notify();
@@ -518,10 +484,7 @@ impl BrowseUi {
                 Ok(r) => r,
                 Err(err) => {
                     let _ = this.update_in(cx, |_this, window, cx| {
-                        window.push_notification(
-                            Notification::warning(format!("{err}")).title("No file selected"),
-                            cx,
-                        );
+                        window.push_notification(Notification::warning(format!("{err}")).title("No file selected"), cx);
                     });
                     return;
                 }
@@ -536,8 +499,8 @@ impl BrowseUi {
                                 .and_then(|e| e.to_str())
                                 .map(|e| {
                                     [
-                                        "jpg", "JPG", "jpeg", "JPEG", "HEIC", "heic", "MOV", "mov",
-                                        "mp4", "MP4", "mpeg", "MPEG", "png", "PNG",
+                                        "JPG", "jpg", "JPEG", "jpeg", "HEIC", "heic", "MOV", "mov", "mp4", "MP4",
+                                        "mpeg", "MPEG", "png", "PNG",
                                     ]
                                     .contains(&e)
                                 })
@@ -549,10 +512,7 @@ impl BrowseUi {
                         let paths = Arc::new(paths);
 
                         if paths.is_empty() {
-                            window.push_notification(
-                                Notification::info("No media files selected"),
-                                cx,
-                            );
+                            window.push_notification(Notification::info("No media files selected"), cx);
                         } else {
                             let entity = cx.weak_entity();
 
@@ -575,10 +535,11 @@ impl BrowseUi {
                                             .flex()
                                             .flex_col()
                                             .gap_2()
-                                            .child(div().font_medium().child(format!(
-                                                "Upload the following {} file(s) ?",
-                                                paths.len()
-                                            )))
+                                            .child(
+                                                div()
+                                                    .font_medium()
+                                                    .child(format!("Upload the following {} file(s) ?", paths.len())),
+                                            )
                                             .children(paths.iter().map(|p| {
                                                 div()
                                                     .px_2()
@@ -602,41 +563,34 @@ impl BrowseUi {
                                         let entity = entity.clone();
                                         let paths = paths.clone();
 
-                                        let cancel = Button::new("upld-cancel")
-                                            .label("Cancel")
-                                            .on_click(|_, window, cx| {
+                                        let cancel =
+                                            Button::new("upld-cancel").label("Cancel").on_click(|_, window, cx| {
                                                 window.close_dialog(cx);
                                             });
 
-                                        let submit = Button::new("upld-sbt")
-                                            .primary()
-                                            .label("Upload")
-                                            .on_click(move |_ev, window, cx| {
+                                        let submit = Button::new("upld-sbt").primary().label("Upload").on_click(
+                                            move |_ev, window, cx| {
                                                 window.close_dialog(cx);
 
                                                 let entity = entity.clone();
                                                 let paths = paths.clone();
                                                 let _ = entity.update(cx, |this, cx| {
                                                     if let Some(folder) = this.folder.as_ref() {
-                                                        this.transfer_manager.update(
-                                                            cx,
-                                                            |um, cx| {
-                                                                um.push(
-                                                                    TransferJob::upload(
-                                                                        paths,
-                                                                        *this
-                                                                            .current_nav
-                                                                            .space_id(),
-                                                                        folder.clone(),
-                                                                        cx,
-                                                                    ),
+                                                        this.transfer_manager.update(cx, |um, cx| {
+                                                            um.push(
+                                                                TransferJob::upload(
+                                                                    paths,
+                                                                    *this.current_nav.space_id(),
+                                                                    folder.clone(),
                                                                     cx,
-                                                                );
-                                                            },
-                                                        );
+                                                                ),
+                                                                cx,
+                                                            );
+                                                        });
                                                     }
                                                 });
-                                            });
+                                            },
+                                        );
 
                                         vec![cancel, submit]
                                     })
@@ -646,10 +600,7 @@ impl BrowseUi {
                 }
                 Err(err) => {
                     let _ = this.update_in(cx, |_this, window, cx| {
-                        window.push_notification(
-                            Notification::error(format!("{err}")).title("Upload cancelled"),
-                            cx,
-                        );
+                        window.push_notification(Notification::error(format!("{err}")).title("Upload cancelled"), cx);
                     });
                 }
                 _ => {}
@@ -673,10 +624,8 @@ impl BrowseUi {
                 Ok(r) => r,
                 Err(err) => {
                     let _ = this.update_in(cx, |_this, window, cx| {
-                        window.push_notification(
-                            Notification::warning(format!("{err}")).title("No folder selected"),
-                            cx,
-                        );
+                        window
+                            .push_notification(Notification::warning(format!("{err}")).title("No folder selected"), cx);
                     });
                     return;
                 }
@@ -688,10 +637,7 @@ impl BrowseUi {
                         Some(path) => path,
                         None => {
                             let _ = this.update_in(cx, |_this, window, cx| {
-                                window.push_notification(
-                                    Notification::warning("No folder selected"),
-                                    cx,
-                                );
+                                window.push_notification(Notification::warning("No folder selected"), cx);
                             });
                             return;
                         }
@@ -715,10 +661,7 @@ impl BrowseUi {
                 }
                 Err(err) => {
                     let _ = this.update_in(cx, |_this, window, cx| {
-                        window.push_notification(
-                            Notification::error(format!("{err}")).title("Download cancelled"),
-                            cx,
-                        );
+                        window.push_notification(Notification::error(format!("{err}")).title("Download cancelled"), cx);
                     });
                 }
                 _ => (),
@@ -766,10 +709,9 @@ impl create_folder_dialog::CreateFolderDialog for BrowseUi {
 
                         this.fetch_folders(window, cx);
                     }
-                    Err(err) => window.push_notification(
-                        Notification::error(err.message).title("Failed to create folder"),
-                        cx,
-                    ),
+                    Err(err) => {
+                        window.push_notification(Notification::error(err.message).title("Failed to create folder"), cx)
+                    }
                 };
                 cx.notify();
             });
@@ -778,10 +720,7 @@ impl create_folder_dialog::CreateFolderDialog for BrowseUi {
     }
 
     fn current_path(&self) -> SharedString {
-        self.folder
-            .as_ref()
-            .map(|f| f.path.clone())
-            .unwrap_or_default()
+        self.folder.as_ref().map(|f| f.path.clone()).unwrap_or_default()
     }
 
     fn is_loading(&self) -> bool {
@@ -790,12 +729,7 @@ impl create_folder_dialog::CreateFolderDialog for BrowseUi {
 }
 
 impl delete_dialog::DeleteDialog for BrowseUi {
-    fn delete(
-        &mut self,
-        fs_id: delete_dialog::DeleteType,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn delete(&mut self, fs_id: delete_dialog::DeleteType, window: &mut Window, cx: &mut Context<Self>) {
         let nav_state = self.current_nav.clone();
         let inner = self.auth.read(cx).inner();
 
@@ -812,13 +746,9 @@ impl delete_dialog::DeleteDialog for BrowseUi {
                             let token = token.clone();
                             let nav_state = nav_state.clone();
                             async move {
-                                api::cloud::delete_file(
-                                    token.as_str(),
-                                    nav_state.space_id(),
-                                    &file_id,
-                                )
-                                .await
-                                .map_err(|err| (err, name))
+                                api::cloud::delete_file(token.as_str(), nav_state.space_id(), &file_id)
+                                    .await
+                                    .map_err(|err| (err, name))
                             }
                         });
 
@@ -883,8 +813,7 @@ impl delete_dialog::DeleteDialog for BrowseUi {
                         };
                     }
                     Err(err) => window.push_notification(
-                        Notification::error(err.message)
-                            .title(format!("Failed to delete {}", fs_id.get_type())),
+                        Notification::error(err.message).title(format!("Failed to delete {}", fs_id.get_type())),
                         cx,
                     ),
                 };
@@ -937,9 +866,13 @@ impl Render for BrowseUi {
                                         .rounded_lg()
                                         .p_4()
                                         .gap_2()
-                                        .child(div().rounded_md().p_2().bg(cx.theme().muted).child(
-                                            Icon::new(IconName::GalleryVerticalEnd).size_5(),
-                                        ))
+                                        .child(
+                                            div()
+                                                .rounded_md()
+                                                .p_2()
+                                                .bg(cx.theme().muted)
+                                                .child(Icon::new(IconName::GalleryVerticalEnd).size_5()),
+                                        )
                                         .child(div().text_lg().child("No media"))
                                         .child(div().child("Upload files to access them anywhere."))
                                         .child(
@@ -979,42 +912,39 @@ impl BrowseUi {
     fn render_sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         Sidebar::new(Side::Left)
             .header(
-                SidebarHeader::new().child(
-                    h_flex()
-                        .gap_2()
-                        .child(Icon::new(IconName::GalleryVerticalEnd))
-                        .child(format!(
-                            "{} items",
-                            self.folders.len() + self.media_state.read(cx).view_list().len()
-                        )),
-                ),
+                SidebarHeader::new().child(h_flex().gap_2().child(Icon::new(IconName::GalleryVerticalEnd)).child(
+                    format!(
+                        "{} items",
+                        self.folders.len() + self.media_state.read(cx).view_list().len()
+                    ),
+                )),
             )
             .when(!self.media_state.read(cx).sections().is_empty(), |this| {
                 this.child(self.render_sidebar_timelies(cx))
             })
-            .child(
-                SidebarGroup::new("Folders").child(SidebarMenu::new().when_else(
-                    self.loading_folders,
-                    |el| {
-                        el.child(
-                            SidebarMenuItem::new("Loading")
-                                .active(false)
-                                .suffix(_components::loading_icon(|icon| icon.size_4())),
-                        )
-                    },
-                    |el| {
-                        el.when_else(
-                            self.folders.is_empty(),
-                            |el| el.child(SidebarMenuItem::new("No folders")),
-                            |el| {
-                                el.children(self.folders.iter().map(|folder| {
-                                    Self::render_sidebar_folder_item(folder.clone(), cx)
-                                }))
-                            },
-                        )
-                    },
-                )),
-            )
+            .child(SidebarGroup::new("Folders").child(SidebarMenu::new().when_else(
+                self.loading_folders,
+                |el| {
+                    el.child(
+                        SidebarMenuItem::new("Loading")
+                            .active(false)
+                            .suffix(_components::loading_icon(|icon| icon.size_4())),
+                    )
+                },
+                |el| {
+                    el.when_else(
+                        self.folders.is_empty(),
+                        |el| el.child(SidebarMenuItem::new("No folders")),
+                        |el| {
+                            el.children(
+                                self.folders
+                                    .iter()
+                                    .map(|folder| Self::render_sidebar_folder_item(folder.clone(), cx)),
+                            )
+                        },
+                    )
+                },
+            )))
             .footer(
                 div().flex().w_full().gap_2().child(
                     create_folder_dialog::trigger(cx.weak_entity())
@@ -1031,57 +961,44 @@ impl BrowseUi {
 
         SidebarGroup::new("Dates").child(
             SidebarMenu::new().child(
-                SidebarMenuItem::new("Times")
-                    .icon(IconName::Calendar)
-                    .suffix(
-                        Button::new("td")
-                            .icon(IconName::ChevronRight)
-                            .small()
-                            .ghost()
-                            .on_click(move |_ev, _window, cx| {
-                                cx.stop_propagation();
-                            })
-                            .dropdown_menu(move |menu, _window, _cx| {
-                                let mut menu = menu.scrollable(true);
+                SidebarMenuItem::new("Times").icon(IconName::Calendar).suffix(
+                    Button::new("td")
+                        .icon(IconName::ChevronRight)
+                        .small()
+                        .ghost()
+                        .on_click(move |_ev, _window, cx| {
+                            cx.stop_propagation();
+                        })
+                        .dropdown_menu(move |menu, _window, _cx| {
+                            let mut menu = menu.scrollable(true);
 
-                                for (date, offset) in sections.iter().cloned() {
+                            for (date, offset) in sections.iter().cloned() {
+                                let entity = entity.clone();
+
+                                menu = menu.menu_element(Box::new(EmptyAction), move |_window, _cx| {
                                     let entity = entity.clone();
 
-                                    menu = menu.menu_element(
-                                        Box::new(EmptyAction),
-                                        move |_window, _cx| {
+                                    div()
+                                        .id("")
+                                        .flex()
+                                        .gap_2()
+                                        .items_center()
+                                        .child(Icon::empty().path("icons/clock.svg"))
+                                        .child(div().child(date.format("%a, %B %d, %Y").to_string()).text_sm())
+                                        .on_click(move |_ev, _window, cx| {
                                             let entity = entity.clone();
 
-                                            div()
-                                                .id("")
-                                                .flex()
-                                                .gap_2()
-                                                .items_center()
-                                                .child(Icon::empty().path("icons/clock.svg"))
-                                                .child(
-                                                    div()
-                                                        .child(
-                                                            date.format("%a, %B %d, %Y")
-                                                                .to_string(),
-                                                        )
-                                                        .text_sm(),
-                                                )
-                                                .on_click(move |_ev, _window, cx| {
-                                                    let entity = entity.clone();
-
-                                                    let _ = entity.update(cx, |this, cx| {
-                                                        this.files_scroll_handle.set_offset(
-                                                            Point::new(px(0.), offset.negate()),
-                                                        );
-                                                        cx.notify();
-                                                    });
-                                                })
-                                        },
-                                    );
-                                }
-                                menu
-                            }),
-                    ),
+                                            let _ = entity.update(cx, |this, cx| {
+                                                this.files_scroll_handle
+                                                    .set_offset(Point::new(px(0.), offset.negate()));
+                                                cx.notify();
+                                            });
+                                        })
+                                });
+                            }
+                            menu
+                        }),
+                ),
             ),
         )
     }
@@ -1125,10 +1042,7 @@ impl BrowseUi {
                                         delete_dialog::comp(
                                             dialog,
                                             entity.clone(),
-                                            delete_dialog::DeleteType::Folder((
-                                                folder_id,
-                                                folder_name.clone(),
-                                            )),
+                                            delete_dialog::DeleteType::Folder((folder_id, folder_name.clone())),
                                             cx,
                                         )
                                     });
@@ -1252,29 +1166,17 @@ impl BrowseUi {
                         window.open_dialog(cx, move |dialog, _window, cx| {
                             let ty = entity
                                 .read_with(cx, |this, _cx| {
-                                    this.file_checked
-                                        .iter()
-                                        .map(|(id, name)| (*id, name.clone()))
-                                        .collect()
+                                    this.file_checked.iter().map(|(id, name)| (*id, name.clone())).collect()
                                 })
                                 .unwrap_or_default();
 
-                            delete_dialog::comp(
-                                dialog,
-                                entity.clone(),
-                                delete_dialog::DeleteType::File(ty),
-                                cx,
-                            )
+                            delete_dialog::comp(dialog, entity.clone(), delete_dialog::DeleteType::File(ty), cx)
                         });
                     })),
             )
     }
 
-    fn render_file_list(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn render_file_list(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("browse_ui")
             .size_full()
@@ -1288,13 +1190,8 @@ impl BrowseUi {
                     .pb_12()
                     .child(
                         div().flex().flex_wrap().gap(MEDIA_GAP).children(
-                            self.media_state
-                                .read(cx)
-                                .view_list()
-                                .iter()
-                                .cloned()
-                                .enumerate()
-                                .map(|(i, element_type)| match element_type {
+                            self.media_state.read(cx).view_list().iter().cloned().enumerate().map(
+                                |(i, element_type)| match element_type {
                                     ElementType::File(file) => self.render_file_item(i, file, cx),
                                     ElementType::Section(date) => div()
                                         .h(SECTION_HEIGHT)
@@ -1307,7 +1204,8 @@ impl BrowseUi {
                                         .font_semibold()
                                         .text_sm()
                                         .child(date.format("%a, %B %d, %Y").to_string()),
-                                }),
+                                },
+                            ),
                         ),
                     )
                     .child({
@@ -1367,12 +1265,8 @@ impl BrowseUi {
                                 .w(px(file.width as f32))
                                 .rounded_md()
                                 .overflow_hidden()
-                                .with_loading(|| {
-                                    loading_icon(|icon| icon.size_4()).into_any_element()
-                                })
-                                .with_fallback(|| {
-                                    Icon::new(IconName::TriangleAlert).into_any_element()
-                                })
+                                .with_loading(|| loading_icon(|icon| icon.size_4()).into_any_element())
+                                .with_fallback(|| Icon::new(IconName::TriangleAlert).into_any_element())
                                 .border_1()
                                 .border_color(cx.theme().sidebar_border)
                                 .when(self.file_checked.contains_key(&file.id), |this| {
@@ -1382,28 +1276,25 @@ impl BrowseUi {
                                     Self::open_media(this, i, window, cx);
                                 })),
                         )
-                        .when(
-                            matches!(file.media_type, MediaType::Video),
-                            |this| {
-                                this.child(
-                                    div()
-                                        .absolute()
-                                        .inset_0()
-                                        .size_full()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .child(
-                                            div()
-                                                .p_2()
-                                                .rounded_full()
-                                                .bg(black().opacity(0.3))
-                                                .text_color(white())
-                                                .child(Icon::empty().path("icons/play.svg")),
-                                        ),
-                                )
-                            },
-                        )
+                        .when(matches!(file.media_type, MediaType::Video), |this| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .inset_0()
+                                    .size_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        div()
+                                            .p_2()
+                                            .rounded_full()
+                                            .bg(black().opacity(0.3))
+                                            .text_color(white())
+                                            .child(Icon::empty().path("icons/play.svg")),
+                                    ),
+                            )
+                        })
                     } else {
                         this.bg(cx.theme().muted)
                             .flex()
@@ -1425,9 +1316,7 @@ impl BrowseUi {
                         .px_2()
                         .py_1()
                         .opacity(0.)
-                        .group_hover(SharedString::new(file.id.to_string()), |el| {
-                            el.opacity(100.)
-                        })
+                        .group_hover(SharedString::new(file.id.to_string()), |el| el.opacity(100.))
                         .truncate()
                         .child(file.file_name.clone()),
                 )
@@ -1442,9 +1331,7 @@ impl BrowseUi {
                         .map(|this| {
                             if !self.file_checked.contains_key(&file.id) {
                                 this.opacity(0.)
-                                    .group_hover(SharedString::new(file.id.to_string()), |el| {
-                                        el.opacity(100.)
-                                    })
+                                    .group_hover(SharedString::new(file.id.to_string()), |el| el.opacity(100.))
                             } else {
                                 this
                             }

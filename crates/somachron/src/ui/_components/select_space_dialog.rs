@@ -4,8 +4,7 @@ use gpui::*;
 use gpui_component::{ActiveTheme, Icon, IconName, StyledExt, dialog::Dialog, v_flex};
 
 use crate::{
-    entities::nav::NavState, ui::_components::create_space_dialog,
-    web::api::models::space::res::UserSpaceResponse,
+    entities::nav::NavState, ui::_components::create_space_dialog, web::api::models::space::res::UserSpaceResponse,
 };
 
 pub fn comp<T: create_space_dialog::CreateSpaceDialog + 'static>(
@@ -73,9 +72,7 @@ pub fn comp<T: create_space_dialog::CreateSpaceDialog + 'static>(
                                         .text_color(cx.theme().muted_foreground),
                                 ),
                         )
-                        .on_click(move |_ev, window, cx| {
-                            on_space_select(entity.clone(), nav_state.clone(), window, cx)
-                        })
+                        .on_click(move |_ev, window, cx| on_space_select(entity.clone(), nav_state.clone(), window, cx))
                 })),
         )
 }

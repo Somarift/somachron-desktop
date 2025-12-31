@@ -24,8 +24,7 @@ pub fn trigger<T: CreateFolderDialog + 'static>(entity: WeakEntity<T>) -> Button
         .on_click(move |_ev, window, cx| {
             let entity = entity.clone();
 
-            let name_input_state =
-                cx.new(|cx| InputState::new(window, cx).placeholder("Folder name"));
+            let name_input_state = cx.new(|cx| InputState::new(window, cx).placeholder("Folder name"));
 
             window.open_dialog(cx, move |dialog, _window, cx| {
                 comp(dialog, entity.clone(), name_input_state.clone(), cx)
@@ -39,9 +38,8 @@ fn comp<T: CreateFolderDialog + 'static>(
     name_input_state: Entity<InputState>,
     cx: &mut App,
 ) -> Dialog {
-    let (name_is_empty, name_is_invalid) = name_input_state.read_with(cx, |this, _cx| {
-        (this.value().is_empty(), this.value().len() > 64)
-    });
+    let (name_is_empty, name_is_invalid) =
+        name_input_state.read_with(cx, |this, _cx| (this.value().is_empty(), this.value().len() > 64));
 
     let (is_loading, current_path) = entity
         .read_with(cx, |this, _cx| (this.is_loading(), this.current_path()))
@@ -61,18 +59,13 @@ fn comp<T: CreateFolderDialog + 'static>(
             v_flex()
                 .gap_2()
                 .child(Label::new(format!("Path: {current_path}")))
-                .child(
-                    Input::new(&name_input_state)
-                        .cleanable(true)
-                        .line_clamp(1)
-                        .map(|this| {
-                            if name_is_invalid {
-                                this.border_1().border_color(cx.theme().danger)
-                            } else {
-                                this
-                            }
-                        }),
-                )
+                .child(Input::new(&name_input_state).cleanable(true).line_clamp(1).map(|this| {
+                    if name_is_invalid {
+                        this.border_1().border_color(cx.theme().danger)
+                    } else {
+                        this
+                    }
+                }))
                 .when(name_is_invalid, |el| {
                     el.child(
                         div()
@@ -100,9 +93,7 @@ fn comp<T: CreateFolderDialog + 'static>(
                 .loading_icon(IconName::LoaderCircle)
                 .loading(is_loading)
                 .on_click(move |_ev, window, cx| {
-                    let name = name_input_state
-                        .clone()
-                        .read_with(cx, |state, _cx| state.value());
+                    let name = name_input_state.clone().read_with(cx, |state, _cx| state.value());
 
                     let _ = entity.update(cx, |this, cx| {
                         this.create_folder(name, window, cx);

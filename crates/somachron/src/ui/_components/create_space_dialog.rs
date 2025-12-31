@@ -29,8 +29,7 @@ pub fn trigger<T: CreateSpaceDialog + 'static>(entity: WeakEntity<T>) -> Button 
             let entity = entity.clone();
 
             let name_input_state = cx.new(|cx| InputState::new(window, cx).placeholder("Name"));
-            let description_input_state =
-                cx.new(|cx| InputState::new(window, cx).placeholder("Description"));
+            let description_input_state = cx.new(|cx| InputState::new(window, cx).placeholder("Description"));
 
             window.open_dialog(cx, move |dialog, _window, cx| {
                 comp(
@@ -51,12 +50,9 @@ fn comp<T: CreateSpaceDialog + 'static>(
     description_input_state: Entity<InputState>,
     cx: &mut App,
 ) -> Dialog {
-    let (name_is_empty, name_is_invalid) = name_input_state.read_with(cx, |this, _cx| {
-        (this.value().is_empty(), this.value().len() > 64)
-    });
-    let is_creating_space = entity
-        .read_with(cx, |this, _cx| this.is_loading())
-        .unwrap_or_default();
+    let (name_is_empty, name_is_invalid) =
+        name_input_state.read_with(cx, |this, _cx| (this.value().is_empty(), this.value().len() > 64));
+    let is_creating_space = entity.read_with(cx, |this, _cx| this.is_loading()).unwrap_or_default();
 
     let _entity = entity.clone();
 
@@ -72,18 +68,13 @@ fn comp<T: CreateSpaceDialog + 'static>(
             v_flex()
                 .gap_2()
                 .child(Label::new("Your shareable space (private by default)"))
-                .child(
-                    Input::new(&name_input_state)
-                        .cleanable(true)
-                        .line_clamp(1)
-                        .map(|this| {
-                            if name_is_invalid {
-                                this.border_1().border_color(cx.theme().danger)
-                            } else {
-                                this
-                            }
-                        }),
-                )
+                .child(Input::new(&name_input_state).cleanable(true).line_clamp(1).map(|this| {
+                    if name_is_invalid {
+                        this.border_1().border_color(cx.theme().danger)
+                    } else {
+                        this
+                    }
+                }))
                 .when(name_is_invalid, |el| {
                     el.child(
                         div()
@@ -92,11 +83,7 @@ fn comp<T: CreateSpaceDialog + 'static>(
                             .text_color(cx.theme().danger),
                     )
                 })
-                .child(
-                    Input::new(&description_input_state)
-                        .cleanable(true)
-                        .line_clamp(1),
-                ),
+                .child(Input::new(&description_input_state).cleanable(true).line_clamp(1)),
         )
         .footer(move |_, _, _, _| {
             let name_input_state = name_input_state.clone();
@@ -117,9 +104,7 @@ fn comp<T: CreateSpaceDialog + 'static>(
                 .loading_icon(IconName::LoaderCircle)
                 .loading(is_creating_space)
                 .on_click(move |_ev, window, cx| {
-                    let name = name_input_state
-                        .clone()
-                        .read_with(cx, |state, _cx| state.value());
+                    let name = name_input_state.clone().read_with(cx, |state, _cx| state.value());
                     let description = description_input_state
                         .clone()
                         .read_with(cx, |state, _cx| state.value());

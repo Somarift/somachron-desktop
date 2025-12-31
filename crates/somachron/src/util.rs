@@ -66,8 +66,7 @@ pub fn os_name() -> String {
 }
 
 #[cfg(target_os = "macos")]
-static MACOS_VERSION_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(\s*\(Build [^)]*[0-9]\))").unwrap());
+static MACOS_VERSION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\s*\(Build [^)]*[0-9]\))").unwrap());
 
 /// Note: This might do blocking IO! Only call from background threads
 pub fn os_version() -> String {
@@ -80,9 +79,7 @@ pub fn os_version() -> String {
         let version_string = version_nsstring.to_string().replace("Version ", "");
         // "15.6.1 (Build 24G90)" -> "15.6.1"
         // "26.0.0 (Build 25A5349a)" -> unchanged (Beta or Rapid Security Response; ends with letter)
-        MACOS_VERSION_REGEX
-            .replace_all(&version_string, "")
-            .to_string()
+        MACOS_VERSION_REGEX.replace_all(&version_string, "").to_string()
     }
 
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -96,9 +93,7 @@ pub fn os_version() -> String {
         } else if let Ok(file) = std::fs::read_to_string(&Path::new("/var/run/os-release")) {
             file
         } else {
-            log::error!(
-                "Failed to load /etc/os-release, /usr/lib/os-release, or /var/run/os-release"
-            );
+            log::error!("Failed to load /etc/os-release, /usr/lib/os-release, or /var/run/os-release");
             "".to_string()
         };
         let mut name = "unknown";

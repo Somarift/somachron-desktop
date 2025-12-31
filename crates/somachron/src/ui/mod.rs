@@ -189,10 +189,7 @@ impl Rooter {
                         match result {
                             Ok(_) => cx.emit(AuthEvent::Session(SessionState::SignedIn)),
                             Err(err) => {
-                                window.push_notification(
-                                    Notification::error(err.message).autohide(false),
-                                    cx,
-                                );
+                                window.push_notification(Notification::error(err.message).autohide(false), cx);
 
                                 if has_session {
                                     cx.emit(AuthEvent::Session(SessionState::SignedIn));
@@ -235,16 +232,11 @@ impl Rooter {
 
                 if let Err(err) = result {
                     let _ = this.update_in(cx, |_this, window, cx| {
-                        window.push_notification(
-                            Notification::error(err.message).title("Failed to refresh auth"),
-                            cx,
-                        );
+                        window.push_notification(Notification::error(err.message).title("Failed to refresh auth"), cx);
                     });
 
                     let _inner = inner.clone();
-                    let result = rt::spawn(cx, async move { _inner.has_session().await })
-                        .unwrap()
-                        .await;
+                    let result = rt::spawn(cx, async move { _inner.has_session().await }).unwrap().await;
                     if let Ok(has_session) = result
                         && !has_session
                     {
@@ -302,9 +294,7 @@ impl Render for Rooter {
                             .gap_x_4()
                             .child(_components::loading_icon(|icon| icon.size_8()))
                             .when_none(&self.session_state, |d| d.child("Loading auth"))
-                            .when_some(self.session_state.clone(), |d, _| {
-                                d.child("Validating session")
-                            }),
+                            .when_some(self.session_state.clone(), |d, _| d.child("Validating session")),
                     ),
                 )
             })

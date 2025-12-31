@@ -126,22 +126,22 @@ impl MediaState {
             acc
         });
 
-        let mut grouped_files = files.into_iter().fold(
-            BTreeMap::<NaiveDate, Vec<FileMetaReponse>>::new(),
-            |mut acc, file| {
-                let date = file.updated_at.date_naive();
-                match acc.get_mut(&date) {
-                    Some(list) => {
-                        list.push(file);
-                    }
-                    None => {
-                        acc.insert(date, vec![file]);
-                    }
-                };
+        let mut grouped_files =
+            files
+                .into_iter()
+                .fold(BTreeMap::<NaiveDate, Vec<FileMetaReponse>>::new(), |mut acc, file| {
+                    let date = file.updated_at.date_naive();
+                    match acc.get_mut(&date) {
+                        Some(list) => {
+                            list.push(file);
+                        }
+                        None => {
+                            acc.insert(date, vec![file]);
+                        }
+                    };
 
-                acc
-            },
-        );
+                    acc
+                });
 
         grouped_files.iter_mut().for_each(|(_, files)| {
             files.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -149,11 +149,8 @@ impl MediaState {
 
         for (date, files) in grouped_files.into_iter().rev() {
             self.view_list.push(ElementType::Section(Arc::new(date)));
-            self.view_list.extend(
-                files
-                    .into_iter()
-                    .map(|file| ElementType::File(Arc::new(file))),
-            );
+            self.view_list
+                .extend(files.into_iter().map(|file| ElementType::File(Arc::new(file))));
         }
     }
 
@@ -206,8 +203,7 @@ impl MediaState {
         }
 
         used_height += MEDIA_HEIGHT + MEDIA_GAP;
-        self.visible_grid
-            .push((used_height, start..self.view_list.len()));
+        self.visible_grid.push((used_height, start..self.view_list.len()));
 
         self.sections = Arc::new(sections);
     }

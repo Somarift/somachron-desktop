@@ -17,13 +17,7 @@ impl AssetSource for AppAssets {
 
     fn list(&self, path: &str) -> gpui::Result<Vec<gpui::SharedString>> {
         Ok(Self::iter()
-            .filter_map(|p| {
-                if p.starts_with(path) {
-                    Some(p.into())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|p| if p.starts_with(path) { Some(p.into()) } else { None })
             .collect())
     }
 }
