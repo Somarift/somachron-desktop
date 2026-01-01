@@ -35,6 +35,19 @@ fn get_window_options(cx: &mut App) -> WindowOptions {
     }
 }
 
+fn set_menus(cx: &mut App) {
+    cx.set_menus(vec![Menu {
+        name: SharedString::new("Somachron"),
+        items: vec![
+            MenuItem::action("About Somachron", ui::About),
+            MenuItem::separator(),
+            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::separator(),
+            MenuItem::action("Quit", ui::Quit),
+        ],
+    }]);
+}
+
 fn main() {
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env().add_directive(Level::INFO.into()))
@@ -45,6 +58,8 @@ fn main() {
         .with_assets(assets::AppAssets)
         .with_http_client(Arc::new(web::WebClient::new()))
         .run(|cx: &mut App| {
+            set_menus(cx);
+
             let window_options = get_window_options(cx);
 
             let store = store::Store::load();

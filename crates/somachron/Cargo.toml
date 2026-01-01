@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [[bin]]
-name = "somachron"
+name = "Somachron"
 path = "src/main.rs"
 
 [dependencies]

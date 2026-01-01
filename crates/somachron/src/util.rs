@@ -17,6 +17,9 @@ impl<T, E> MapAsync<T, E> for Result<T, E> {
     }
 }
 
+pub const APP_VERSION: &str = env!("SOMACHRON_VERSION");
+pub const APP_COMMIT_SHA: &str = env!("SOMACHRON_COMMIT_SHA");
+
 pub fn human_readable_size(bytes: i64) -> gpui::SharedString {
     const UNITS: [&str; 9] = ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
 

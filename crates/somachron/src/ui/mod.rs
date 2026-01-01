@@ -7,6 +7,7 @@ use crate::{
     entities::{UserData, nav::NavStack, transfer::TransferManager},
     rt,
     ui::{home::HomeUi, login::LoginUi},
+    util,
 };
 
 mod _components;
@@ -14,7 +15,7 @@ mod header;
 mod home;
 mod login;
 
-actions!(window, [CloseWindow, Quit]);
+actions!(window, [CloseWindow, Quit, About]);
 pub const APP_CONTEXT: &str = "Rooter";
 
 fn init_kb(cx: &mut App) {
@@ -259,6 +260,24 @@ impl Rooter {
             auth.save(cx);
         });
     }
+
+    fn open_about_dialog(&mut self, _: &About, window: &mut Window, cx: &mut Context<Self>) {
+        let message = format!("Somachron {}", util::APP_VERSION);
+        let detail = util::APP_COMMIT_SHA;
+
+        let task = window.prompt(
+            PromptLevel::Info,
+            message.as_str(),
+            Some(detail),
+            &[PromptButton::Ok(SharedString::new_static("Ok"))],
+            cx,
+        );
+
+        cx.spawn(async move |_this, _cx| {
+            let _ = task.await;
+        })
+        .detach();
+    }
 }
 
 impl Render for Rooter {
@@ -279,6 +298,7 @@ impl Render for Rooter {
                 this.on_close_or_quit(cx);
                 cx.quit();
             }))
+            .on_action(cx.listener(Self::open_about_dialog))
             .size_full()
             .child(self.header_ui.clone())
             .when(self.auth_loading, |d| {

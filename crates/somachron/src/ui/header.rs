@@ -285,13 +285,12 @@ impl HeaderUi {
 
         tracing::info!(msg = "Starting job loop");
 
+        let inner = self.auth.read(cx).inner();
         cx.spawn_in(window, async move |this, cx| {
             loop {
-                let jobs_result = this.read_with(cx, |this, cx| this.transfer_manager.read(cx).next(cx).cloned());
+                let inner = inner.clone();
 
-                let Ok(inner) = this.read_with(cx, |this, cx| this.auth.read(cx).inner()) else {
-                    break;
-                };
+                let jobs_result = this.read_with(cx, |this, cx| this.transfer_manager.read(cx).next(cx).cloned());
 
                 match jobs_result {
                     Ok(jobs) => match jobs {
@@ -316,9 +315,7 @@ impl HeaderUi {
                                 });
 
                                 job.clone().update(cx, |job, cx| {
-                                    if job.uploads.iter().all(|u| matches!(u.url_state, UrlState::Done)) {
-                                        job.status = JobStatus::Done;
-                                    }
+                                    job.status = JobStatus::Done;
                                     cx.notify();
                                 });
                             });
@@ -337,9 +334,7 @@ impl HeaderUi {
 
                             let _ = this.update(cx, |_this, cx| {
                                 job.clone().update(cx, |job, cx| {
-                                    if job.downloads.iter().all(|u| matches!(u.url_state, UrlState::Done)) {
-                                        job.status = JobStatus::Done;
-                                    }
+                                    job.status = JobStatus::Done;
                                     cx.notify();
                                 });
                             });
