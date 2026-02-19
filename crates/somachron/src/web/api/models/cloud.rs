@@ -36,8 +36,14 @@ pub mod res {
     }
 
     #[derive(Debug, Deserialize, Clone)]
-    pub struct StreamedUrlResponse {
+    pub struct DownloadUrlResponse {
         pub url: String,
+    }
+
+    #[derive(Debug, Deserialize, Clone)]
+    pub struct StreamedUrlResponse {
+        pub thumbnail_url: String,
+        pub preview_url: String,
     }
 
     #[derive(Debug, Deserialize, Clone)]
@@ -64,7 +70,7 @@ pub mod req {
     }
 
     #[derive(Debug, Serialize)]
-    pub struct UploadCompleteRequest {
+    pub struct QueueMediaRequest {
         pub folder_id: Uuid,
         pub file_name: String,
         pub file_size: u64,

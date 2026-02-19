@@ -49,7 +49,12 @@ pub async fn download(url: String, dst: PathBuf) -> Result<PathBuf, AppError> {
     })
 }
 
-pub async fn upload(url: &str, from: PathBuf) -> Result<(u64, u64), AppError> {
+pub struct UploadRet {
+    pub file_size: u64,
+    pub updated_millis: u64,
+}
+
+pub async fn upload(url: &str, from: PathBuf) -> Result<UploadRet, AppError> {
     let file = tokio::fs::File::open(&from).await.map_err(|err| AppError::err(err))?;
     let metadata = file.metadata().await.map_err(|err| AppError::err(err))?;
 
@@ -76,7 +81,10 @@ pub async fn upload(url: &str, from: PathBuf) -> Result<(u64, u64), AppError> {
 
     if status.is_success() {
         tracing::info!(msg = "Uploaded file", path = format!("{}", from.to_string_lossy()));
-        return Ok((file_size, updated_millis));
+        return Ok(UploadRet {
+            file_size,
+            updated_millis,
+        });
     }
 
     let text = res.text().await.map_err(|err| AppError::err(err))?;

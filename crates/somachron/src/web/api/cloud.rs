@@ -3,8 +3,8 @@ use uuid::Uuid;
 use crate::web::api::{
     EmptyResponse,
     models::cloud::{
-        req::{CreateFolderRequest, InitiateUploadRequest, UploadCompleteRequest},
-        res::{InitiateUploadResponse, StreamedUrlResponse},
+        req::{CreateFolderRequest, InitiateUploadRequest, QueueMediaRequest},
+        res::{DownloadUrlResponse, InitiateUploadResponse, StreamedUrlResponse},
     },
 };
 
@@ -29,15 +29,7 @@ pub async fn get_folder(token: &str, space_id: &Uuid, folder_id: &Uuid) -> Resul
     super::get(format!("/media/d/{folder_id}"), token, Some(space_id)).await
 }
 
-pub async fn get_thumbnail_stream_url(
-    token: &str,
-    space_id: &Uuid,
-    file_id: &Uuid,
-) -> Result<StreamedUrlResponse, AppError> {
-    super::get(format!("/media/stream/th/{file_id}"), token, Some(space_id)).await
-}
-
-pub async fn get_preview_stream_url(
+pub async fn get_thumbnail_preview_stream_urls(
     token: &str,
     space_id: &Uuid,
     file_id: &Uuid,
@@ -49,7 +41,7 @@ pub async fn get_download_stream_url(
     token: &str,
     space_id: &Uuid,
     file_id: &Uuid,
-) -> Result<StreamedUrlResponse, AppError> {
+) -> Result<DownloadUrlResponse, AppError> {
     super::get(format!("/media/download/{file_id}"), token, Some(space_id)).await
 }
 
@@ -97,7 +89,7 @@ pub async fn init_file_upload(
     .await
 }
 
-pub async fn complete_file_upload(
+pub async fn queue_media(
     token: &str,
     space_id: &Uuid,
     folder_id: &Uuid,
@@ -106,10 +98,10 @@ pub async fn complete_file_upload(
     millis: u64,
 ) -> Result<EmptyResponse, AppError> {
     super::post(
-        "/media/upload/complete",
+        "/media/queue",
         token,
         Some(space_id),
-        UploadCompleteRequest {
+        QueueMediaRequest {
             folder_id: *folder_id,
             file_name: name.to_owned(),
             file_size: size,

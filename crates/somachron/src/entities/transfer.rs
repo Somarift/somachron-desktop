@@ -2,6 +2,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use futures::StreamExt;
 use gpui::*;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::{
@@ -10,8 +11,8 @@ use crate::{
     rt,
     util::MapAsync,
     web::api::{
-        self,
-        models::cloud::res::{FolderResponse, InitiateUploadResponse, StreamedUrlResponse},
+        self, UploadRet,
+        models::cloud::res::{DownloadUrlResponse, FolderResponse, InitiateUploadResponse},
     },
 };
 
@@ -19,6 +20,7 @@ use crate::{
 pub enum UrlState<T> {
     Queued,
     Transferring(T),
+    Processing,
     Done,
     Error(AppError),
 }
@@ -31,7 +33,7 @@ pub struct UploadState {
 pub struct DownloadState {
     pub file_id: Uuid,
     pub path: PathBuf,
-    pub url_state: UrlState<StreamedUrlResponse>,
+    pub url_state: UrlState<DownloadUrlResponse>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +41,7 @@ pub enum JobStatus {
     Queued,
     InProgress,
     Done,
+    Failed,
 }
 
 pub struct UploadJob {
@@ -46,120 +49,129 @@ pub struct UploadJob {
     pub space_id: Uuid,
     pub folder: FolderResponse,
     pub status: JobStatus,
+    pub completed: usize,
 }
 
 impl UploadJob {
-    pub async fn initialize_uploads(inner: Arc<InnerAuth>, job: Entity<Self>, cx: &mut AsyncWindowContext) {
-        let tasks = job
+    pub async fn execute(
+        inner: Arc<InnerAuth>,
+        job: Entity<Self>,
+        cx: &mut AsyncWindowContext,
+    ) -> Result<(), AppError> {
+        let (tx, mut rx) = mpsc::unbounded_channel::<(usize, UrlState<InitiateUploadResponse>)>();
+
+        let task = job
             .read_with(cx, |this, cx| {
-                let job = job.clone();
                 let folder_id = this.folder.id;
                 let space_id = this.space_id;
 
-                this.uploads
+                let files: Vec<(Arc<str>, PathBuf)> = this
+                    .uploads
                     .iter()
-                    .enumerate()
-                    .map(|(i, state)| {
+                    .map(|state| {
+                        (
+                            state
+                                .path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .map_or(Arc::from(""), Arc::from),
+                            state.path.clone(),
+                        )
+                    })
+                    .collect();
+
+                rt::spawn(cx, async move {
+                    let init_uploads = files.into_iter().enumerate().map(|(i, (file_name, path))| {
+                        let _tx = tx.clone();
                         let inner = inner.clone();
-                        let job = job.clone();
 
-                        let file_name = state
-                            .path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .map(|s| s.to_owned())
-                            .unwrap_or_default();
-
-                        let task = rt::spawn(cx, async move {
-                            inner
-                                .get_token()
-                                .await
-                                .map_async(async move |token| {
-                                    api::cloud::init_file_upload(&token, &space_id, &folder_id, &file_name).await
-                                })
-                                .await
-                        });
-
-                        cx.spawn(async move |cx| {
-                            let result = task.await.flatten();
-                            let _ = job.update(cx, |job, cx| {
-                                if let Some(u) = job.uploads.get_mut(i) {
-                                    match result {
-                                        Ok(data) => u.url_state = UrlState::Transferring(data),
-                                        Err(err) => u.url_state = UrlState::Error(err),
-                                    }
+                        async move {
+                            let token = match inner.get_token().await {
+                                Ok(token) => token,
+                                Err(err) => {
+                                    _tx.send((i, UrlState::Error(err))).unwrap();
+                                    return;
                                 }
-                                cx.notify();
-                            });
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+                            };
 
-        run_batched(cx, tasks).await
-    }
+                            let result = api::cloud::init_file_upload(&token, &space_id, &folder_id, &file_name).await;
+                            let data = match result {
+                                Ok(data) => {
+                                    _tx.send((i, UrlState::Transferring(data.clone()))).unwrap();
+                                    data
+                                }
+                                Err(err) => {
+                                    _tx.send((i, UrlState::Error(err))).unwrap();
+                                    return;
+                                }
+                            };
 
-    pub async fn upload_files(inner: Arc<InnerAuth>, job: Entity<Self>, cx: &mut AsyncWindowContext) {
-        let tasks = job
-            .read_with(cx, |this, cx| {
-                let folder_id = this.folder.id;
-                let space_id = this.space_id;
+                            let result = api::upload(data.url.as_str(), path).await;
+                            let UploadRet {
+                                file_size,
+                                updated_millis,
+                            } = match result {
+                                Ok(data) => {
+                                    _tx.send((i, UrlState::Processing)).unwrap();
+                                    data
+                                }
+                                Err(err) => {
+                                    _tx.send((i, UrlState::Error(err))).unwrap();
+                                    return;
+                                }
+                            };
 
-                this.uploads
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, state)| {
-                        let job = job.clone();
-                        let inner = inner.clone();
-                        let path = state.path.clone();
-
-                        match &state.url_state {
-                            UrlState::Transferring(data) => {
-                                let InitiateUploadResponse { url, file_name } = data.clone();
-
-                                let task = rt::spawn(cx, async move {
-                                    api::upload(url.as_str(), path)
-                                        .await
-                                        .map_async(async move |data| {
-                                            inner.get_token().await.map(|token| (token, data.0, data.1))
-                                        })
-                                        .await
-                                        .map_async(async move |(token, file_size, updated_millis)| {
-                                            api::cloud::complete_file_upload(
-                                                &token,
-                                                &space_id,
-                                                &folder_id,
-                                                file_name.as_str(),
-                                                file_size,
-                                                updated_millis,
-                                            )
-                                            .await
-                                        })
-                                        .await
-                                });
-
-                                Some(cx.spawn(async move |cx| {
-                                    let result = task.await.flatten();
-                                    let _ = job.update(cx, |job, cx| {
-                                        if let Some(u) = job.uploads.get_mut(i) {
-                                            match result {
-                                                Ok(_) => u.url_state = UrlState::Done,
-                                                Err(err) => u.url_state = UrlState::Error(err),
-                                            }
-                                        }
-                                        cx.notify();
-                                    });
-                                }))
-                            }
-                            _ => None,
+                            let token = match inner.get_token().await {
+                                Ok(token) => token,
+                                Err(err) => {
+                                    _tx.send((i, UrlState::Error(err))).unwrap();
+                                    return;
+                                }
+                            };
+                            let result = api::cloud::queue_media(
+                                &token,
+                                &space_id,
+                                &folder_id,
+                                &file_name,
+                                file_size,
+                                updated_millis,
+                            )
+                            .await;
+                            match result {
+                                Ok(_) => _tx.send((i, UrlState::Done)).unwrap(),
+                                Err(err) => _tx.send((i, UrlState::Error(err))).unwrap(),
+                            };
                         }
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+                    });
 
-        run_batched(cx, tasks).await
+                    let _ = futures::stream::iter(init_uploads)
+                        .buffer_unordered(8)
+                        .collect::<Vec<_>>()
+                        .await;
+
+                    Ok(())
+                })
+            })
+            .map_err(|err| AppError::err(err.root_cause()))?;
+
+        cx.spawn(async move |cx| {
+            while let Some((index, result)) = rx.recv().await {
+                let _ = job.update(cx, |job, cx| {
+                    if let UrlState::Done = result {
+                        job.completed += 1;
+                    }
+                    if let Some(u) = job.uploads.get_mut(index) {
+                        u.url_state = result;
+                    }
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+
+        let _ = task.await.flatten()?;
+
+        Ok(())
     }
 }
 
@@ -284,6 +296,7 @@ impl TransferJob {
             space_id,
             folder,
             status: JobStatus::Queued,
+            completed: 0,
         }))
     }
 
@@ -331,6 +344,7 @@ impl TransferJob {
                         JobStatus::Queued => "Queued",
                         JobStatus::InProgress => "Uploading",
                         JobStatus::Done => "Completed",
+                        JobStatus::Failed => "Failed",
                     },
                     this.folder.path,
                 )
@@ -342,6 +356,7 @@ impl TransferJob {
                         JobStatus::Queued => "Queued",
                         JobStatus::InProgress => "Downloading to",
                         JobStatus::Done => "Completed",
+                        JobStatus::Failed => "Failed",
                     },
                     this.dst_path.display(),
                 )
@@ -377,7 +392,7 @@ impl TransferManager {
         self.jobs = self
             .jobs
             .iter()
-            .filter(|j| matches!(j.status(cx), JobStatus::Queued))
+            .filter(|j| !matches!(j.status(cx), JobStatus::Done))
             .cloned()
             .collect();
     }
