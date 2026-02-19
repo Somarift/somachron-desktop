@@ -1,15 +1,25 @@
+use std::sync::Arc;
+
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::{
-    ActiveTheme, IconName,
+    ActiveTheme, Icon, IconName, WindowExt,
     button::{Button, ButtonVariants},
+    notification::Notification,
 };
 
 use crate::{
+    auth::Auth,
     entities::{
-        media::{FetchMedia, MediaAssetState, MediaState, PreviewAssetType},
+        media::{FetchMedia, MediaAssetState, MediaCacher, MediaState},
         nav::{NavId, NavState},
     },
+    rt,
     ui::_components::loading_icon,
+    util::MapAsync,
+    web::api::{
+        self,
+        models::cloud::{MediaType, res::FileMetaReponse},
+    },
 };
 
 actions!(media, [Left, Right]);
@@ -21,30 +31,39 @@ fn init_kb(cx: &mut App) {
 }
 
 pub struct MediaUi {
+    auth: Entity<Auth>,
     focus_handle: FocusHandle,
     current_nav: NavState,
     media_data: Entity<MediaState>,
+    media_cacher: Entity<MediaCacher>,
     ptr: usize,
+    loading: bool,
 }
 
 impl MediaUi {
     fn new(
+        auth: Entity<Auth>,
         focus_handle: FocusHandle,
         current_nav: NavState,
         media_data: Entity<MediaState>,
         ptr: usize,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Self {
+        let media_cacher = cx.new(|cx| MediaCacher::new(4, cx));
         Self {
+            auth,
             focus_handle,
             current_nav,
             media_data,
+            media_cacher,
             ptr,
+            loading: false,
         }
     }
 
     pub fn view(
+        auth: Entity<Auth>,
         current_nav: NavState,
         media_data: Entity<MediaState>,
         ptr: usize,
@@ -57,11 +76,12 @@ impl MediaUi {
             let fh = cx.focus_handle();
             fh.focus(window);
 
-            Self::new(fh, current_nav.for_media(), media_data, ptr, window, cx)
+            Self::new(auth, fh, current_nav.for_media(), media_data, ptr, window, cx)
         })
     }
 
     fn left(&mut self, cx: &mut Context<Self>) {
+        self.loading = false;
         self.media_data.update(cx, |md, cx| {
             let index = self.ptr.checked_sub(1).unwrap_or(self.ptr);
 
@@ -75,6 +95,7 @@ impl MediaUi {
     }
 
     fn right(&mut self, cx: &mut Context<Self>) {
+        self.loading = false;
         self.media_data.update(cx, |md, cx| {
             if let Some((index, file)) = md.get_next_file(self.ptr + 1) {
                 self.ptr = index;
@@ -83,6 +104,45 @@ impl MediaUi {
             cx.notify();
         });
         cx.notify();
+    }
+
+    fn fetch_play_video(&mut self, file: Arc<FileMetaReponse>, window: &mut Window, cx: &mut Context<Self>) {
+        let inner = self.auth.read(cx).inner();
+        let nav_state = self.current_nav.clone();
+        let file_id = file.id;
+
+        let task = rt::spawn(cx, async move {
+            inner
+                .get_token()
+                .await
+                .map_async(async move |token| {
+                    api::cloud::get_download_stream_url(&token, nav_state.space_id(), &file_id).await
+                })
+                .await
+        });
+
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await.flatten();
+
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.loading = false;
+                match result {
+                    Ok(data) => {
+                        cx.background_spawn(async move {
+                            let _ = std::process::Command::new("open")
+                                .args(["-a", "quicktime player", data.url.as_str()])
+                                .spawn();
+                        })
+                        .detach();
+                    }
+                    Err(err) => {
+                        window.push_notification(Notification::error(err.message), cx);
+                    }
+                };
+                cx.notify();
+            });
+        })
+        .detach();
     }
 }
 
@@ -127,42 +187,72 @@ impl Render for MediaUi {
                             md.get_file(self.ptr)
                                 .and_then(|f| md.asset(&f.id).cloned().map(|asset| (f, asset)))
                         }),
-                        |this, (file, asset_state)| {
-                            if let MediaAssetState::Loaded { preview_asset_ty, .. } = asset_state.clone() {
-                                match preview_asset_ty {
-                                    PreviewAssetType::Loading => this
+                        |this, (file, asset_state)| match asset_state {
+                            MediaAssetState::Queued | MediaAssetState::Idle => this
+                                .child(
+                                    div()
+                                        .size_full()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(loading_icon(|icon| icon.size_8())),
+                                )
+                                .size_full(),
+                            MediaAssetState::Loaded { preview_path, .. } => this
+                                .child(
+                                    img(ImageSource::Resource(Resource::Path(preview_path.into())))
+                                        .image_cache(&self.media_cacher)
+                                        .id(SharedString::new(format!("{}", file.id)))
+                                        .size_full()
+                                        .rounded_md()
+                                        .overflow_hidden()
+                                        .object_fit(ObjectFit::Contain)
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .with_loading(|| loading_icon(|icon| icon.size_8()).into_any_element()),
+                                )
+                                .when(matches!(file.media_type, MediaType::Video), |this| {
+                                    this.child(
+                                        div()
+                                            .absolute()
+                                            .inset_0()
+                                            .size_full()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(
+                                                div()
+                                                    .id(SharedString::new(file.id.to_string()))
+                                                    .p_6()
+                                                    .rounded_full()
+                                                    .bg(black().opacity(0.5))
+                                                    .text_color(white())
+                                                    .child(Icon::empty().path("icons/play.svg").size_8())
+                                                    .cursor_pointer()
+                                                    .hover(|this| this.bg(black().opacity(0.8)))
+                                                    .on_click(cx.listener(move |this, _ev, window, cx| {
+                                                        this.fetch_play_video(file.clone(), window, cx);
+                                                    })),
+                                            ),
+                                    )
+                                }),
+                            MediaAssetState::Error(err) => this
+                                .child(
+                                    div()
+                                        .size_full()
+                                        .flex()
+                                        .flex_col()
+                                        .items_center()
+                                        .justify_center()
                                         .child(
-                                            div()
-                                                .size_full()
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .child(loading_icon(|icon| icon.size_8())),
+                                            Icon::new(IconName::TriangleAlert)
+                                                .size_8()
+                                                .text_color(cx.theme().danger),
                                         )
-                                        .size_full(),
-                                    PreviewAssetType::Preview(path_buf) => {
-                                        this.child(
-                                            img(ImageSource::Resource(Resource::Path(path_buf.into())))
-                                                .id(SharedString::new(format!("{}", file.id)))
-                                                .size_full()
-                                                .rounded_md()
-                                                .overflow_hidden()
-                                                // .image_cache(&self.image_cache)
-                                                .object_fit(ObjectFit::Contain)
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .with_loading(|| loading_icon(|icon| icon.size_8()).into_any_element()),
-                                        )
-                                    }
-                                    PreviewAssetType::VideoUrl(url) => {
-                                        dbg!(&url.to_string());
-                                        this.child(div().child("Video")).size_full()
-                                    }
-                                }
-                            } else {
-                                this
-                            }
+                                        .child(div().text_center().child(err.message)),
+                                )
+                                .size_full(),
                         },
                     )
                     .child(

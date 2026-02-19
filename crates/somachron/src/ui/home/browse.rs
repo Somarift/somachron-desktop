@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range, path::PathBuf, str::FromStr, sync::Arc};
+use std::{collections::HashMap, ops::Range, sync::Arc};
 
 use futures::StreamExt;
 use gpui::{prelude::FluentBuilder, *};
@@ -13,7 +13,6 @@ use gpui_component::{
     scroll::ScrollableElement,
     sidebar::{Sidebar, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem},
 };
-use url::Url;
 use uuid::Uuid;
 
 use crate::{
@@ -22,8 +21,7 @@ use crate::{
         UserData,
         bounds::RenderBounds,
         media::{
-            ElementType, FetchMedia, MEDIA_GAP, MEDIA_HEIGHT, MediaAssetState, MediaState, PreviewAssetType,
-            SECTION_HEIGHT,
+            ElementType, FetchMedia, MEDIA_GAP, MEDIA_HEIGHT, MediaAssetState, MediaCacher, MediaState, SECTION_HEIGHT,
         },
         nav::{NavEvent, NavId, NavState, Navigation},
         transfer::{TransferJob, TransferManager},
@@ -57,6 +55,7 @@ pub struct BrowseUi {
     folder: Option<FolderResponse>,
     folders: Vec<FolderResponse>,
     media_state: Entity<MediaState>,
+    media_cacher: Entity<MediaCacher>,
     file_checked: HashMap<Uuid, SharedString>,
 
     visible_item_range: Range<usize>,
@@ -81,6 +80,7 @@ impl BrowseUi {
         cx: &mut Context<Self>,
     ) -> Self {
         let media_state = cx.new(|_cx| MediaState::new());
+        let media_cacher = cx.new(|cx| MediaCacher::new(1, cx));
         let render_bounds = cx.new(|_cx| RenderBounds::new());
 
         let size_sub = cx.subscribe_in(&render_bounds, window, |this, _entity, _event, _window, cx| {
@@ -120,6 +120,7 @@ impl BrowseUi {
             folder: None,
             folders: Vec::new(),
             media_state,
+            media_cacher,
             file_checked: HashMap::new(),
             visible_item_range: 0..0,
             files_scroll_handle: ScrollHandle::new(),
@@ -179,6 +180,11 @@ impl BrowseUi {
 
         this.visible_item_range = this.render_bounds.read_with(cx, |bounds, _cx| {
             this.media_state.read(cx).get_initial_visible_range(bounds)
+        });
+        this.media_cacher.update(cx, |mc, cx| {
+            let items = this.visible_item_range.end - this.visible_item_range.start;
+            mc.update_max_items(items + 8);
+            cx.notify();
         });
 
         cx.notify();
@@ -305,7 +311,7 @@ impl BrowseUi {
         let file = self.media_state.update(cx, |ms, cx| {
             if let Some(state) = ms.asset_mut(&file.id) {
                 match state {
-                    MediaAssetState::Queued | MediaAssetState::Error | MediaAssetState::Loaded { .. } => {
+                    MediaAssetState::Queued | MediaAssetState::Error(_) | MediaAssetState::Loaded { .. } => {
                         return None;
                     }
                     _ => (),
@@ -333,28 +339,32 @@ impl BrowseUi {
                 _file.id,
                 _file.updated_at.timestamp_millis()
             ));
+            let preview_file = cache_dir.join(format!("preview_{}_{}", _file.id, _file.updated_at.timestamp_millis()));
 
-            if thumbnail_file.exists() {
-                return Ok(thumbnail_file);
+            if thumbnail_file.exists() && preview_file.exists() {
+                return Ok((thumbnail_file, preview_file));
             }
 
             let file_id = _file.id;
             let th_path = thumbnail_file.clone();
-            let result = inner
+            let p_path = preview_file.clone();
+            let urls = inner
                 .get_token()
                 .await
                 .map_async(async move |token| {
-                    api::cloud::get_thumbnail_stream_url(&token, nav_state.space_id(), &file_id).await
+                    api::cloud::get_thumbnail_preview_stream_urls(&token, nav_state.space_id(), &file_id).await
                 })
-                .await
-                .map_async(async move |urls| api::download(urls.url, th_path).await)
-                .await;
+                .await?;
 
-            if result.is_err() {
-                let _ = tokio::fs::remove_file(&thumbnail_file).await;
+            let (thumbnail, preview) = tokio::join!(
+                api::download(urls.thumbnail_url, th_path),
+                api::download(urls.preview_url, p_path)
+            );
+
+            match thumbnail {
+                Ok(th_path) => preview.map(|p_path| (th_path, p_path)),
+                Err(err) => Err(err),
             }
-
-            result
         });
 
         cx.spawn_in(window, async move |this, cx| {
@@ -362,95 +372,23 @@ impl BrowseUi {
 
             let _ = this.update_in(cx, |this, window, cx| {
                 match result {
-                    Ok(th_path) => {
+                    Ok((th_path, p_path)) => {
                         this.media_state.update(cx, |ms, _cx| {
                             if let Some(u) = ms.asset_mut(&file.id) {
                                 *u = MediaAssetState::Loaded {
-                                    thumbnail_path: th_path.clone(),
-                                    preview_asset_ty: PreviewAssetType::Loading,
-                                };
-                            }
-                        });
-
-                        this.__fetch_preview_url(window, cx, file, th_path);
-                    }
-                    Err(err) => {
-                        this.media_state.update(cx, |ms, _cx| {
-                            if let Some(u) = ms.asset_mut(&file.id) {
-                                *u = MediaAssetState::Error;
-                            }
-                        });
-                        window.push_notification(Notification::error(err.message), cx);
-                    }
-                };
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn __fetch_preview_url(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        file: Arc<FileMetaReponse>,
-        thumbnail_path: PathBuf,
-    ) {
-        let nav_state = self.current_nav.clone();
-        let inner = self.auth.read(cx).inner();
-
-        let _file = file.clone();
-        let task = rt::spawn(cx, async move {
-            let cache_dir = paths::cache_dir().map_err(|err| AppError::err(err))?;
-
-            let preview_file = cache_dir.join(format!("preview_{}_{}", _file.id, _file.updated_at.timestamp_millis()));
-
-            if _file.media_type == MediaType::Image && preview_file.exists() {
-                return Ok(PreviewAssetType::Preview(preview_file));
-            }
-
-            let file_id = _file.id;
-            let pr_path = preview_file.clone();
-            let result = inner
-                .get_token()
-                .await
-                .map_async(async move |token| {
-                    api::cloud::get_preview_stream_url(&token, nav_state.space_id(), &file_id).await
-                })
-                .await
-                .map_async(async move |urls| match _file.media_type {
-                    MediaType::Image => api::download(urls.url, pr_path).await.map(PreviewAssetType::Preview),
-                    MediaType::Video => {
-                        let url = Url::from_str(&urls.url).map_err(|err| AppError::err(err))?;
-                        Ok(PreviewAssetType::VideoUrl(url))
-                    }
-                })
-                .await;
-
-            if result.is_err() {
-                let _ = tokio::fs::remove_file(&preview_file).await;
-            }
-
-            result
-        });
-
-        cx.spawn_in(window, async move |this, cx| {
-            let result = task.await.flatten();
-
-            let _ = this.update_in(cx, |this, window, cx| {
-                match result {
-                    Ok(pr_ty) => {
-                        this.media_state.update(cx, |ms, _cx| {
-                            if let Some(u) = ms.asset_mut(&file.id) {
-                                *u = MediaAssetState::Loaded {
-                                    thumbnail_path,
-                                    preview_asset_ty: pr_ty,
+                                    thumbnail_path: th_path,
+                                    preview_path: p_path,
                                 };
                             }
                         });
                     }
                     Err(err) => {
-                        window.push_notification(Notification::error(err.message), cx);
+                        window.push_notification(Notification::error(&err.message), cx);
+                        this.media_state.update(cx, |ms, _cx| {
+                            if let Some(u) = ms.asset_mut(&file.id) {
+                                *u = MediaAssetState::Error(err);
+                            }
+                        });
                     }
                 };
                 cx.notify();
@@ -462,7 +400,14 @@ impl BrowseUi {
     fn open_media(this: &mut Self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         this.nav.update(cx, |nav, cx| {
             nav.push(
-                MediaUi::view(this.current_nav.clone(), this.media_state.clone(), index, window, cx),
+                MediaUi::view(
+                    this.auth.clone(),
+                    this.current_nav.clone(),
+                    this.media_state.clone(),
+                    index,
+                    window,
+                    cx,
+                ),
                 cx,
             );
             cx.notify();
@@ -500,7 +445,7 @@ impl BrowseUi {
                                 .map(|e| {
                                     [
                                         "JPG", "jpg", "JPEG", "jpeg", "HEIC", "heic", "MOV", "mov", "mp4", "MP4",
-                                        "mpeg", "MPEG", "png", "PNG",
+                                        "mpeg", "MPEG", "mpg", "MPG", "png", "PNG", "bmp", "BMP",
                                     ]
                                     .contains(&e)
                                 })
@@ -1254,6 +1199,7 @@ impl BrowseUi {
                     {
                         this.child(
                             img(ImageSource::Resource(Resource::Path(thumbnail_path.into())))
+                                .image_cache(&self.media_cacher)
                                 .object_fit(ObjectFit::Cover)
                                 .flex()
                                 .items_center()

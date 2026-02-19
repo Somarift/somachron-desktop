@@ -1,15 +1,16 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, VecDeque},
     ops::Range,
     path::PathBuf,
     sync::Arc,
 };
 
 use chrono::NaiveDate;
+use futures::FutureExt;
 use gpui::*;
 use uuid::Uuid;
 
-use crate::web::api::models::cloud::res::FileMetaReponse;
+use crate::{err::AppError, web::api::models::cloud::res::FileMetaReponse};
 
 pub const MEDIA_HEIGHT: Pixels = px(176.);
 pub const MEDIA_GAP: Pixels = px(4.);
@@ -22,21 +23,14 @@ pub struct FetchMedia {
 impl EventEmitter<FetchMedia> for MediaState {}
 
 #[derive(Debug, Clone)]
-pub enum PreviewAssetType {
-    Loading,
-    Preview(PathBuf),
-    VideoUrl(url::Url),
-}
-
-#[derive(Debug, Clone)]
 pub enum MediaAssetState {
     Idle,
     Queued,
     Loaded {
         thumbnail_path: PathBuf,
-        preview_asset_ty: PreviewAssetType,
+        preview_path: PathBuf,
     },
-    Error,
+    Error(AppError),
 }
 
 #[derive(Debug, Clone)]
@@ -253,5 +247,85 @@ impl MediaState {
         self.view_list.clear();
         self.asset_states.clear();
         self.visible_grid.clear();
+    }
+}
+
+pub struct MediaCacher {
+    max_items: usize,
+    deque: VecDeque<u64>,
+    cache: HashMap<u64, ImageCacheItem>,
+}
+
+impl MediaCacher {
+    pub fn new(max_items: usize, cx: &mut Context<Self>) -> Self {
+        assert_ne!(max_items, 0);
+
+        cx.on_release(|cache, cx| {
+            for (_, mut item) in std::mem::take(&mut cache.cache) {
+                if let Some(Ok(image)) = item.get() {
+                    cx.drop_image(image, None);
+                }
+            }
+        })
+        .detach();
+
+        Self {
+            max_items,
+            deque: VecDeque::with_capacity(max_items),
+            cache: HashMap::with_capacity(max_items),
+        }
+    }
+
+    pub fn update_max_items(&mut self, max_items: usize) {
+        self.max_items = max_items;
+    }
+}
+
+impl ImageCache for MediaCacher {
+    fn load(
+        &mut self,
+        resource: &Resource,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<std::result::Result<Arc<RenderImage>, ImageCacheError>> {
+        let hash = hash(resource);
+
+        // we have cache image, return
+        if let Some(item) = self.cache.get_mut(&hash) {
+            return item.get();
+        }
+
+        // trim cache
+        while self.deque.len() == self.max_items {
+            let oldest = self
+                .deque
+                .pop_front()
+                .expect("Wait.. how does pop fails if length is max_items ?");
+            let mut image = self.cache.remove(&oldest).expect("cache not in sync ??");
+            if let Some(Ok(image)) = image.get() {
+                cx.drop_image(image, Some(window));
+            }
+        }
+
+        // spawn loader task
+        let fut = AssetLogger::<ImageAssetLoader>::load(resource.clone(), cx);
+        let task = cx.background_executor().spawn(fut).shared();
+
+        // cache image
+        self.cache.insert(hash, ImageCacheItem::Loading(task.clone()));
+        self.deque.push_back(hash);
+
+        // notify
+        let entity_id = window.current_view();
+        window
+            .spawn(cx, async move |cx| {
+                let _ = task.await;
+                cx.on_next_frame(move |_window, cx| {
+                    cx.notify(entity_id);
+                });
+            })
+            .detach();
+
+        None
     }
 }
