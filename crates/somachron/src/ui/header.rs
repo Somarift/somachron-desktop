@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use gpui::{prelude::FluentBuilder, *};
 use gpui_component::collapsible::Collapsible;
+use gpui_component::progress::Progress;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{
     ActiveTheme as _, Disableable, Icon, IconName, Sizable, StyledExt, ThemeMode, TitleBar, WindowExt,
@@ -303,8 +304,25 @@ impl HeaderUi {
                                 });
                             });
 
-                            UploadJob::initialize_uploads(inner.clone(), job.clone(), cx).await;
-                            UploadJob::upload_files(inner, job.clone(), cx).await;
+                            if let Err(err) = UploadJob::execute(inner.clone(), job.clone(), cx).await {
+                                let _ = this.update_in(cx, |this, window, cx| {
+                                    let space_id = job.read(cx).space_id;
+                                    let folder_id = job.read(cx).folder.id;
+
+                                    window.push_notification(Notification::error(err.message), cx);
+
+                                    this.nav.update(cx, |_nav, cx| {
+                                        cx.emit(NavEvent::RefreshView(NavState::new(space_id, folder_id)));
+                                    });
+
+                                    job.clone().update(cx, |job, cx| {
+                                        job.status = JobStatus::Failed;
+                                        cx.notify();
+                                    });
+                                });
+
+                                continue;
+                            }
 
                             let _ = this.update(cx, |this, cx| {
                                 let space_id = job.read(cx).space_id;
@@ -723,7 +741,20 @@ impl HeaderUi {
                                     match job.clone() {
                                         TransferJob::Upload(job) => this
                                             .child(Self::render_upload_job_menu_view(i, job.clone(), cx))
-                                            .child(div().child(format!("Total items: {}", job.read(cx).uploads.len()))),
+                                            .child(div().child(format!(
+                                                "Progress: {}/{}",
+                                                job.read(cx).completed,
+                                                job.read(cx).uploads.len()
+                                            )))
+                                            .child(
+                                                Progress::new()
+                                                    .value(
+                                                        (job.read(cx).completed as f32
+                                                            / job.read(cx).uploads.len() as f32)
+                                                            * 100.0,
+                                                    )
+                                                    .w_full(),
+                                            ),
                                         TransferJob::Download(job) => this
                                             .child(Self::render_download_job_menu_view(i, job.clone(), cx))
                                             .child(
@@ -784,9 +815,10 @@ impl HeaderUi {
                             ),
                     )
                     .map(|this| match &state.url_state {
-                        UrlState::Queued => this.child(loading_icon(|icon| icon.size_4())),
+                        UrlState::Queued => this.child(Icon::empty().path("icons/clock.svg")),
                         UrlState::Transferring(_) => this.child(Icon::empty().path("icons/upload.svg")),
                         UrlState::Done => this.child(Icon::empty().path("icons/check.svg").text_color(green())),
+                        UrlState::Processing => this.child(loading_icon(|icon| icon.size_4())),
                         UrlState::Error(err) => {
                             let message = err.message.clone();
                             this.child(
@@ -839,9 +871,10 @@ impl HeaderUi {
                             ),
                     )
                     .map(|this| match &state.url_state {
-                        UrlState::Queued => this.child(loading_icon(|icon| icon.size_4())),
+                        UrlState::Queued => this.child(Icon::empty().path("icons/clock.svg")),
                         UrlState::Transferring(_) => this.child(Icon::empty().path("icons/download.svg")),
                         UrlState::Done => this.child(Icon::empty().path("icons/check.svg").text_color(green())),
+                        UrlState::Processing => this.child(loading_icon(|icon| icon.size_4())),
                         UrlState::Error(err) => {
                             let message = err.message.clone();
                             this.child(
