@@ -24,6 +24,7 @@ pub struct WebClient {
 impl WebClient {
     pub fn new() -> Self {
         let user_agent = make_user_agent();
+        tracing::info!(msg = "User-Agent", agent = user_agent.to_str().unwrap());
 
         let client = make_http_client();
         Self { client, user_agent }
@@ -31,15 +32,13 @@ impl WebClient {
 }
 
 pub fn make_user_agent() -> reqwest::header::HeaderValue {
-    reqwest::header::HeaderValue::from_str(
-        format!(
-            "Somachron-Desktop/0.1.0 ({} {}) GPUI/0.2.2",
-            util::os_name(),
-            util::os_version(),
-        )
-        .as_str(),
-    )
-    .expect("Failed to create user-agent header")
+    let user_agent = format!(
+        "Somachron-Desktop/0.1.0 ({} {}) GPUI/0.2.2",
+        util::os_name(),
+        util::os_version(),
+    );
+
+    reqwest::header::HeaderValue::from_str(user_agent.as_str()).expect("Failed to create user-agent header")
 }
 
 pub(super) fn make_http_client() -> reqwest::Client {
